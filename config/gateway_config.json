@@ -1,0 +1,62 @@
+{
+  "_comment": "Industrial IoT Gateway — Runtime Configuration",
+  "_version": "1.0.0",
+
+  "mqtt": {
+    "_comment": "Mosquitto broker runs locally on the Raspberry Pi 4",
+    "host": "localhost",
+    "port": 1883,
+    "topic": "factory/sensors/+/data",
+    "client_id": "iiot_gateway_pi4",
+    "keep_alive": 60,
+    "qos": 1,
+    "retain": false,
+    "reconnect_delay_seconds": 5
+  },
+
+  "snmpv3": {
+    "_comment": "SNMPv3 authPriv — SHA authentication + AES-128 encryption",
+    "agent_port": 161,
+    "trap_target_host": "192.168.1.100",
+    "trap_target_port": 162,
+    "user": "admin_sec_gw",
+    "context_name": "factory_context",
+    "security_level": "authPriv",
+    "auth_protocol": "SHA",
+    "auth_pass": "auth_password",
+    "priv_protocol": "AES",
+    "priv_pass": "priv_password",
+    "engine_id": "80001F8803",
+    "enterprise_oid": "1.3.6.1.4.1.9999"
+  },
+
+  "database": {
+    "path": "db/factory_data.db",
+    "retention_days": 7
+  },
+
+  "watchdog": {
+    "_comment": "Heartbeat: if no message from a node within timeout_seconds, mark OFFLINE",
+    "check_interval_seconds": 5,
+    "offline_timeout_seconds": 30
+  },
+
+  "thresholds": {
+    "_comment": "Anomaly detection rules — violations trigger LEVEL_2/3 events",
+    "temp_jump_celsius": 20.0,
+    "humi_jump_percent": 40.0,
+    "temp_warning_high": 45.0,
+    "temp_critical_high": 50.0
+  },
+
+  "recovery": {
+    "_comment": "Number of consecutive valid packets required before clearing FAULTY state",
+    "valid_packets_required": 3
+  },
+
+  "logging": {
+    "debug_log":    "logs/system_debug.log",
+    "security_log": "logs/security_alerts.log",
+    "level": "INFO"
+  }
+}
