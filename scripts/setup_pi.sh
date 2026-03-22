@@ -151,8 +151,7 @@ apt-get install -y -qq \
     wget \
     curl \
     ca-certificates \
-    lsb-release \
-    software-properties-common
+    lsb-release
 
 ok "Build toolchain installed."
 
