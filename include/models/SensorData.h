@@ -33,6 +33,7 @@ enum class DeviceStatus : uint8_t {
     CRITICAL      = 2,   ///< Critical hardware/software fault on device
     NOT_OPERATING = 3,   ///< Device explicitly declared non-operational
     OFFLINE       = 4,   ///< Gateway-inferred: heartbeat timeout exceeded
+    FAULTY        = 5,   ///< Gateway-locked: after NOT_OPERATING, pending recovery
     UNKNOWN       = 255  ///< Fallback — status string could not be parsed
 };
 
@@ -96,6 +97,31 @@ struct SensorReading {
     {}
 };
 
+// ------------------------------------------------------------------------------
+// SecurityEvent
+//
+// Represents one entry in the `system_events` audit table.
+// Created by DataProcessor and Watchdog when a security or fault condition is
+// detected, then persisted via DatabaseManager::insertSystemEvent().
+//
+// Also written to logs/security_alerts.log as a flat-file audit trail.
+//
+// severity field values:
+//   "WARNING"  → LEVEL_1 — near-threshold or informational
+//   "ERROR"    → LEVEL_2 — device fault, humidity jump, hardware anomaly
+//   "CRITICAL" → LEVEL_3 — replay attack, spoofed device, temp jump, offline
+// ------------------------------------------------------------------------------
+struct SecurityEvent {
+    std::string nodeId;       ///< Originating device (may be "UNKNOWN" for rogue nodes)
+    std::string severity;     ///< "WARNING" | "ERROR" | "CRITICAL"
+    std::string description;  ///< Human-readable incident description
+    int64_t     timestamp;    ///< Unix epoch seconds when the event was detected
+
+    SecurityEvent()
+        : timestamp(0)
+    {}
+};
+
 // ==============================================================================
 // Helper Free Functions
 // Kept as inline functions here to avoid a separate .cpp compilation unit for
@@ -110,6 +136,7 @@ inline std::string deviceStatusToString(DeviceStatus s) {
         case DeviceStatus::CRITICAL:      return "CRITICAL";
         case DeviceStatus::NOT_OPERATING: return "NOT_OPERATING";
         case DeviceStatus::OFFLINE:       return "OFFLINE";
+        case DeviceStatus::FAULTY:        return "FAULTY";
         default:                          return "UNKNOWN";
     }
 }

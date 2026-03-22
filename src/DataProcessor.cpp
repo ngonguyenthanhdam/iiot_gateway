@@ -15,21 +15,24 @@
 #include <cmath>        // abs
 #include <stdexcept>    // invalid_argument, runtime_error
 
-using namespace std;
-
 namespace IndustrialGateway {
+
+using namespace std;
+using namespace chrono;
 
 // =============================================================================
 // Internal helpers (anonymous namespace — not exported in any header)
 // =============================================================================
 namespace {
 
+
+
 // -----------------------------------------------------------------------------
 // nowStr() — produces a UTC timestamp for log lines: [2024-05-14 08:30:01 UTC]
 // -----------------------------------------------------------------------------
 string nowStr() {
-    auto now = chrono::system_clock::now();
-    time_t t = chrono::system_clock::to_time_t(now);
+    auto now = system_clock::now();
+    time_t t = system_clock::to_time_t(now);
     tm tm_buf{};
     gmtime_r(&t, &tm_buf);
     ostringstream oss;
@@ -53,6 +56,8 @@ constexpr const char* kFieldTemp        = "temp";
 constexpr const char* kFieldHumi        = "humi";
 
 } // anonymous namespace
+
+
 
 // =============================================================================
 // Constructor & Destructor
@@ -958,10 +963,10 @@ string DataProcessor::extractNodeIdFromTopic(const string& topic) {
 // -----------------------------------------------------------------------------
 int64_t DataProcessor::nowEpoch() {
     return static_cast<int64_t>(
-        chrono::duration_cast<chrono::seconds>(
-            chrono::system_clock::now().time_since_epoch()
+        duration_cast<seconds>(
+            system_clock::now().time_since_epoch()
         ).count()
     );
 }
-
-} // namespace IndustrialGateway
+// namespace IndustrialGateway
+} 

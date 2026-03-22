@@ -12,6 +12,20 @@
 //     metric writes and trap sends, which are thread-safe via mutexes.
 // =============================================================================
 
+// ---------------------------------------------------------------------------
+// net-snmp headers — must be included FIRST, in this exact order, and only
+// in this .cpp file.  Including them in SnmpAgent.h would propagate the
+// agent API macros into every translation unit, causing cascading errors.
+//
+// Mandatory order required by net-snmp:
+//   1. net-snmp-config.h   — feature-test macros and platform detection
+//   2. net-snmp-includes.h — core types: oid, u_char, netsnmp_session, etc.
+//   3. net-snmp-agent-includes.h — agent API: handler registration, MIB ops
+// ---------------------------------------------------------------------------
+#include <net-snmp/net-snmp-config.h>
+#include <net-snmp/net-snmp-includes.h>
+#include <net-snmp/agent/net-snmp-agent-includes.h>
+
 #include "SnmpAgent.h"
 
 // C standard library (needed for net-snmp internals)
@@ -903,5 +917,5 @@ size_t SnmpAgent::getNodeCount() const noexcept {
     lock_guard<mutex> lock(m_metricsMutex);
     return m_metricsCache.size();
 }
-
-} // namespace IndustrialGateway
+// namespace IndustrialGateway
+} 

@@ -13,16 +13,27 @@
 #include <ctime>
 #include <iomanip>     // put_time
 #include <algorithm>   // min
-#include <cstring>     // strlen, memcpy via mosquitto_message
-
-using namespace std;
+#include <cstring>     // strlen
 
 namespace IndustrialGateway {
+
+using namespace std;
+using namespace chrono;
 
 // =============================================================================
 // Internal helpers (file-scope anonymous namespace — not exported)
 // =============================================================================
 namespace {
+
+// Using declarations scoped to this anonymous namespace.
+using string;
+using ostringstream;
+using time_t;
+using tm;
+using put_time;
+using min;
+using chrono::system_clock;
+using seconds;
 
 // -----------------------------------------------------------------------------
 // nowStr() — UTC timestamp prefix for every log line, e.g.
@@ -30,8 +41,8 @@ namespace {
 // Called from multiple methods; kept as a free function to avoid code dup.
 // -----------------------------------------------------------------------------
 string nowStr() {
-    auto now = chrono::system_clock::now();
-    time_t t = chrono::system_clock::to_time_t(now);
+    auto now = system_clock::now();
+    time_t t = system_clock::to_time_t(now);
     tm tm_buf{};
     gmtime_r(&t, &tm_buf);   // POSIX thread-safe variant of gmtime()
     ostringstream oss;
@@ -59,6 +70,24 @@ int backOffSeconds(int attempt) {
 }
 
 } // anonymous namespace
+
+// Using declarations for the IndustrialGateway namespace scope.
+using string;
+using mutex;
+using lock_guard;
+using thread;
+using runtime_error;
+using function;
+using cout;
+using cerr;
+using move;
+using to_string;
+using strlen;
+using strerror;
+using size_t;
+using memory_order_relaxed;
+using sleep_for;
+using seconds;
 
 // =============================================================================
 // Constructor
@@ -294,7 +323,7 @@ void MqttClient::on_connect(int rc) {
         m_connected.store(false);
         cerr << nowStr()
                   << " [MQTT] ✗ Broker refused connection: "
-                  << mqttRcToString(rc) << " (rc=" << rc << ")\n";
+                  << connackToString(rc) << " (rc=" << rc << ")\n";
     }
 }
 
@@ -497,7 +526,7 @@ void MqttClient::scheduleReconnect() {
     // mosquitto loop thread itself (that would stall QoS retransmissions
     // and keep-alive pings for other potential clients on the same broker).
     thread([this, delaySec]() {
-        this_thread::sleep_for(chrono::seconds(delaySec));
+        sleep_for(seconds(delaySec));
 
         // Check again after waking: stop() may have been called during sleep
         if (!m_shouldRun.load()) {
@@ -523,35 +552,57 @@ void MqttClient::scheduleReconnect() {
 }
 
 // -----------------------------------------------------------------------------
-// mqttRcToString — human-readable MQTT return code descriptions.
-// Only maps the codes defined by the MQTT 3.1.1 spec + mosquitto extras.
+// connackToString — decodes the rc value passed to on_connect().
+//
+// The MQTT 3.1.1 CONNACK return codes (0–5) are a completely separate
+// namespace from the MOSQ_ERR_* library error codes.  The CONNACK codes are
+// ONLY ever delivered via on_connect(rc); they are NEVER returned by library
+// calls such as connect_async(), subscribe(), etc.
+//
+// This function is intentionally separate from mqttRcToString() to avoid the
+// duplicate-case-value compiler error that would result from the integer
+// overlap: MOSQ_ERR_NOMEM=1, MOSQ_ERR_PROTOCOL=2, … MOSQ_ERR_CONN_REFUSED=5
+// all share their numeric values with CONNACK codes 1–5.
 // -----------------------------------------------------------------------------
-string MqttClient::mqttRcToString(int rc) {
+static string connackToString(int rc) {
     switch (rc) {
-        case MOSQ_ERR_SUCCESS:          return "Success";
-        case MOSQ_ERR_NOMEM:            return "Out of memory";
-        case MOSQ_ERR_PROTOCOL:         return "Protocol error";
-        case MOSQ_ERR_INVAL:            return "Invalid parameters";
-        case MOSQ_ERR_NO_CONN:          return "No connection";
-        case MOSQ_ERR_CONN_REFUSED:     return "Connection refused by broker";
-        case MOSQ_ERR_NOT_FOUND:        return "Not found";
-        case MOSQ_ERR_CONN_LOST:        return "Connection lost";
-        case MOSQ_ERR_TLS:              return "TLS error";
-        case MOSQ_ERR_PAYLOAD_SIZE:     return "Payload too large";
-        case MOSQ_ERR_NOT_SUPPORTED:    return "Not supported";
-        case MOSQ_ERR_AUTH:             return "Authentication failed";
-        case MOSQ_ERR_ACL_DENIED:       return "ACL denied";
-        case MOSQ_ERR_UNKNOWN:          return "Unknown error";
-        case MOSQ_ERR_ERRNO:            return string("System error: ")
-                                             + strerror(errno);
-        // MQTT CONNACK refusal codes (sent by broker in rc of on_connect)
-        case 1:  return "CONNACK: Unacceptable protocol version";
-        case 2:  return "CONNACK: Client identifier rejected";
-        case 3:  return "CONNACK: Broker unavailable";
-        case 4:  return "CONNACK: Bad username or password";
-        case 5:  return "CONNACK: Not authorised";
-        default: return "Unknown code (" + to_string(rc) + ")";
+        case 0: return "Connection accepted";
+        case 1: return "CONNACK: Unacceptable protocol version";
+        case 2: return "CONNACK: Client identifier rejected";
+        case 3: return "CONNACK: Broker unavailable";
+        case 4: return "CONNACK: Bad username or password";
+        case 5: return "CONNACK: Not authorised";
+        default: return "CONNACK: Unknown refusal code (" + to_string(rc) + ")";
     }
 }
 
-} // namespace IndustrialGateway
+// -----------------------------------------------------------------------------
+// mqttRcToString — decodes MOSQ_ERR_* library return codes only.
+//
+// Do NOT pass on_connect() rc values here — use connackToString() instead.
+// The MQTT CONNACK codes 1–5 collide numerically with MOSQ_ERR_NOMEM(1)
+// through MOSQ_ERR_CONN_REFUSED(5), so they are handled in a separate function.
+// -----------------------------------------------------------------------------
+string MqttClient::mqttRcToString(int rc) {
+    switch (rc) {
+        case MOSQ_ERR_SUCCESS:       return "Success";
+        case MOSQ_ERR_NOMEM:         return "Out of memory";
+        case MOSQ_ERR_PROTOCOL:      return "Protocol error";
+        case MOSQ_ERR_INVAL:         return "Invalid parameters";
+        case MOSQ_ERR_NO_CONN:       return "No connection";
+        case MOSQ_ERR_CONN_REFUSED:  return "Connection refused by broker";
+        case MOSQ_ERR_NOT_FOUND:     return "Not found";
+        case MOSQ_ERR_CONN_LOST:     return "Connection lost";
+        case MOSQ_ERR_TLS:           return "TLS error";
+        case MOSQ_ERR_PAYLOAD_SIZE:  return "Payload too large";
+        case MOSQ_ERR_NOT_SUPPORTED: return "Not supported";
+        case MOSQ_ERR_AUTH:          return "Authentication failed";
+        case MOSQ_ERR_ACL_DENIED:    return "ACL denied";
+        case MOSQ_ERR_UNKNOWN:       return "Unknown error";
+        case MOSQ_ERR_ERRNO:         return string("System error: ")
+                                          + strerror(errno);
+        default: return "Unknown code (" + to_string(rc) + ")";
+    }
+}
+// namespace IndustrialGateway
+} 

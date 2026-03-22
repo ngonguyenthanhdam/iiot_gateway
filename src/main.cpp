@@ -91,6 +91,9 @@
 #include <ctime>
 #include <iomanip>       // put_time
 
+using namespace std;
+using namespace chrono;
+
 // Bring the project namespace into scope for this file
 using namespace IndustrialGateway;
 
@@ -137,8 +140,8 @@ static void signalHandler(int signum) {
 // nowStr — UTC timestamp prefix for all main.cpp log lines
 // -----------------------------------------------------------------------------
 static string nowStr() {
-    auto now  = chrono::system_clock::now();
-    time_t t = chrono::system_clock::to_time_t(now);
+    auto now  = system_clock::now();
+    time_t t = system_clock::to_time_t(now);
     tm tm_buf{};
     gmtime_r(&t, &tm_buf);
     ostringstream oss;
@@ -586,7 +589,7 @@ int main(int argc, char* argv[]) {
 
     // Periodic status interval
     constexpr int k_statusIntervalSec = 30;
-    auto lastStatus = chrono::steady_clock::now();
+    auto lastStatus = steady_clock::now();
 
     // Block the main thread using condition_variable wait.
     // The signal handler sets g_shutdownFlag and calls notify_all().
@@ -596,14 +599,14 @@ int main(int argc, char* argv[]) {
             unique_lock<mutex> lock(g_shutdownMutex);
             g_shutdownCv.wait_for(
                 lock,
-                chrono::seconds(1),
+                seconds(1),
                 []() { return g_shutdownFlag.load(memory_order_acquire); }
             );
         }
 
         // Print periodic status every k_statusIntervalSec seconds
-        auto now = chrono::steady_clock::now();
-        auto elapsed = chrono::duration_cast<chrono::seconds>(
+        auto now = steady_clock::now();
+        auto elapsed = duration_cast<seconds>(
                            now - lastStatus).count();
         if (elapsed >= k_statusIntervalSec) {
             printStatus(*mqttClient, *dataProcessor, *snmpAgent, *watchdog);

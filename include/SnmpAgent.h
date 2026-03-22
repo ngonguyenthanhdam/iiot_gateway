@@ -65,11 +65,34 @@
 #ifndef SNMP_AGENT_H
 #define SNMP_AGENT_H
 
-// net-snmp C library headers
-// Install: sudo apt install libsnmp-dev snmp
-#include <net-snmp/net-snmp-config.h>
-#include <net-snmp/net-snmp-includes.h>
-#include <net-snmp/agent/net-snmp-agent-includes.h>
+// ---------------------------------------------------------------------------
+// net-snmp forward declarations
+//
+// The full net-snmp agent headers (#include <net-snmp/agent/...>) are ONLY
+// included in SnmpAgent.cpp.  Pulling them into this header would inject the
+// entire net-snmp agent API into every translation unit that includes
+// SnmpAgent.h (DataProcessor, MqttClient, Watchdog, main), causing cascading
+// redefinition and type-mismatch errors from net-snmp's internal C macros.
+//
+// Only the four struct types that appear in the static callback signature
+// need to be visible here; forward declarations are sufficient because the
+// header never dereferences any of these pointers.
+// ---------------------------------------------------------------------------
+struct netsnmp_mib_handler_s;
+struct netsnmp_handler_registration_s;
+struct netsnmp_agent_request_info_s;
+struct netsnmp_request_info_s;
+
+// Bring the canonical typedef names into scope so the callback declaration
+// below compiles cleanly.  net-snmp defines these as:
+//   typedef struct netsnmp_mib_handler_s          netsnmp_mib_handler;
+//   typedef struct netsnmp_handler_registration_s netsnmp_handler_registration;
+//   typedef struct netsnmp_agent_request_info_s   netsnmp_agent_request_info;
+//   typedef struct netsnmp_request_info_s         netsnmp_request_info;
+typedef struct netsnmp_mib_handler_s          netsnmp_mib_handler;
+typedef struct netsnmp_handler_registration_s netsnmp_handler_registration;
+typedef struct netsnmp_agent_request_info_s   netsnmp_agent_request_info;
+typedef struct netsnmp_request_info_s         netsnmp_request_info;
 
 // C++ standard library
 #include <string>

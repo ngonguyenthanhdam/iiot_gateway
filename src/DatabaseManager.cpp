@@ -11,10 +11,10 @@
 #include <sstream>
 #include <chrono>
 #include <ctime>
-#include <iomanip>   // std::put_time
+#include <iomanip>   // put_time
 
 using namespace std;
-
+using namespace chrono;
 namespace IndustrialGateway {
 
 // =============================================================================
@@ -25,8 +25,8 @@ namespace {
 
 /// Returns current UTC time as a compact log prefix: [2024-05-14 08:30:01]
 string nowStr() {
-    auto now   = chrono::system_clock::now();
-    time_t t = chrono::system_clock::to_time_t(now);
+    auto now   = system_clock::now();
+    time_t t = system_clock::to_time_t(now);
     tm tm_buf{};
     gmtime_r(&t, &tm_buf);   // thread-safe (POSIX)
     ostringstream oss;
@@ -168,7 +168,7 @@ DatabaseManager& DatabaseManager::operator=(DatabaseManager&& other) noexcept {
 //
 // TABLE: sensor_logs
 //   Append-only time-series table.  device_id is a FK to devices.id.
-//   temp and humi are REAL NULLABLE — std::nullopt becomes SQL NULL.
+//   temp and humi are REAL NULLABLE — nullopt becomes SQL NULL.
 //   An index on (device_id, timestamp) accelerates the getLastMsgId() query
 //   and the history API endpoint served by the FastAPI backend.
 //
@@ -334,7 +334,7 @@ int64_t DatabaseManager::ensureDeviceExists(const string& nodeId) {
 // Uses a prepared statement with bound parameters — never string concatenation
 // — to prevent SQL injection and handle special characters in nodeId.
 //
-// std::optional handling:
+// optional handling:
 //   temperature.has_value() == false  →  sqlite3_bind_null (stored as SQL NULL)
 //   temperature.has_value() == true   →  sqlite3_bind_double
 // -----------------------------------------------------------------------------
@@ -504,9 +504,9 @@ int64_t DatabaseManager::purgeOldLogs(int retentionDays) {
     lock_guard<mutex> lock(m_mutex);
 
     // Compute the cutoff as a Unix epoch value
-    auto now     = chrono::system_clock::now();
-    auto cutoff  = now - chrono::hours(24 * retentionDays);
-    int64_t cutoffEpoch = chrono::duration_cast<chrono::seconds>(
+    auto now     = system_clock::now();
+    auto cutoff  = now - hours(24 * retentionDays);
+    int64_t cutoffEpoch = duration_cast<seconds>(
                               cutoff.time_since_epoch()).count();
 
     const char* sql = "DELETE FROM sensor_logs WHERE timestamp < ?;";
