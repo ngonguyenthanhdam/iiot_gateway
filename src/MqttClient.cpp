@@ -17,23 +17,16 @@
 
 namespace IndustrialGateway {
 
+// Bring std and std::chrono names into scope for this translation unit.
+// These are placed at namespace scope inside the .cpp file only —
+// never in a header — so they cannot pollute other translation units.
 using namespace std;
-using namespace chrono;
+using namespace std::chrono;
 
 // =============================================================================
 // Internal helpers (file-scope anonymous namespace — not exported)
 // =============================================================================
 namespace {
-
-// Using declarations scoped to this anonymous namespace.
-using string;
-using ostringstream;
-using time_t;
-using tm;
-using put_time;
-using min;
-using chrono::system_clock;
-using seconds;
 
 // -----------------------------------------------------------------------------
 // nowStr() — UTC timestamp prefix for every log line, e.g.
@@ -71,23 +64,11 @@ int backOffSeconds(int attempt) {
 
 } // anonymous namespace
 
-// Using declarations for the IndustrialGateway namespace scope.
-using string;
-using mutex;
-using lock_guard;
-using thread;
-using runtime_error;
-using function;
-using cout;
-using cerr;
-using move;
-using to_string;
-using strlen;
-using strerror;
-using size_t;
-using memory_order_relaxed;
-using sleep_for;
-using seconds;
+// Forward declaration — connackToString is defined later in this file,
+// after the mosquittopp virtual overrides that call it.  The forward
+// declaration makes it visible to on_connect() without moving the full
+// definition (and its long doc-comment) ahead of unrelated code.
+static string connackToString(int rc);
 
 // =============================================================================
 // Constructor
@@ -526,7 +507,9 @@ void MqttClient::scheduleReconnect() {
     // mosquitto loop thread itself (that would stall QoS retransmissions
     // and keep-alive pings for other potential clients on the same broker).
     thread([this, delaySec]() {
-        sleep_for(seconds(delaySec));
+        // sleep_for lives in std::this_thread, not std::chrono, so it needs
+        // its sub-namespace qualifier even with 'using namespace std' in scope.
+        this_thread::sleep_for(seconds(delaySec));
 
         // Check again after waking: stop() may have been called during sleep
         if (!m_shouldRun.load()) {
@@ -605,4 +588,4 @@ string MqttClient::mqttRcToString(int rc) {
     }
 }
 // namespace IndustrialGateway
-} 
+}
