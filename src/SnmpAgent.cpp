@@ -25,13 +25,15 @@
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 #include <net-snmp/agent/net-snmp-agent-includes.h>
-
+#include <net-snmp/library/snmpusm.h>
+#include <net-snmp/agent/agent_user.h>
 #include "SnmpAgent.h"
 
 // C standard library (needed for net-snmp internals)
 #include <cstring>      // memcpy, memset
 #include <cstdio>       // snprintf
-
+#include <optional>
+#include <atomic>
 // C++ standard library
 #include <iostream>
 #include <sstream>
@@ -360,7 +362,7 @@ void SnmpAgent::createUsmUser() {
 //   netsnmp_handler_registration* reg =
 //       netsnmp_create_handler_registration(name, handler_fn, oid, oid_len,
 //                                           HANDLER_CAN_RONLY);
-//   reg->my_void = context_ptr;   ← carry our instance + column info
+//   reg->my_reg_void = context_ptr;   ← carry our instance + column info
 //   netsnmp_register_scalar(reg);
 //
 // Because we don't know the node list at init() time (nodes may connect after
@@ -424,7 +426,7 @@ void SnmpAgent::registerOids() {
             }
 
             // Attach our context so the callback can find the data
-            reg->my_void = static_cast<void*>(ctx);
+            reg->my_reg_void = static_cast<void*>(ctx);
 
             // Register as a scalar OID
             int rc = netsnmp_register_scalar(reg);
@@ -451,7 +453,7 @@ void SnmpAgent::registerOids() {
 // incoming GET / GETNEXT / GETBULK PDU for one of our registered OIDs.
 //
 // The callback is C-style (required by net-snmp).  We recover the C++ instance
-// via reginfo->my_void (cast to HandlerContext*).
+// via reginfo->my_reg_void (cast to HandlerContext*).
 //
 // Response encoding:
 //   device_status / alert_state  → ASN_INTEGER   (snmp_set_var_typed_integer)
@@ -473,12 +475,12 @@ int SnmpAgent::oidHandlerCallback(netsnmp_mib_handler*          handler,
     }
 
     // Recover our context from the registration
-    if (!reginfo || !reginfo->my_void) {
+    if (!reginfo || !reginfo->my_reg_void) {
         netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_GENERR);
         return SNMP_ERR_GENERR;
     }
 
-    auto* ctx   = static_cast<HandlerContext*>(reginfo->my_void);
+    auto* ctx   = static_cast<HandlerContext*>(reginfo->my_reg_void);
     SnmpAgent* self = ctx->agent;
     int nodeIdx = stoi(ctx->nodeId);   // 1-based slot index
     oid column  = ctx->column;
@@ -918,4 +920,4 @@ size_t SnmpAgent::getNodeCount() const noexcept {
     return m_metricsCache.size();
 }
 // namespace IndustrialGateway
-} 
+}

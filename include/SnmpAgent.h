@@ -84,15 +84,19 @@ struct netsnmp_agent_request_info_s;
 struct netsnmp_request_info_s;
 
 // Bring the canonical typedef names into scope so the callback declaration
-// below compiles cleanly.  net-snmp defines these as:
-//   typedef struct netsnmp_mib_handler_s          netsnmp_mib_handler;
-//   typedef struct netsnmp_handler_registration_s netsnmp_handler_registration;
-//   typedef struct netsnmp_agent_request_info_s   netsnmp_agent_request_info;
-//   typedef struct netsnmp_request_info_s         netsnmp_request_info;
+// below compiles cleanly.  When SnmpAgent.h is included AFTER the net-snmp
+// headers (as in SnmpAgent.cpp), these typedefs are already defined by
+// <net-snmp/net-snmp-includes.h> — redefining them would be a compile error.
+// The #ifndef guards make this block a no-op in that translation unit while
+// still providing the names for all other translation units that include
+// only this header (DataProcessor, MqttClient, Watchdog, main).
+#ifndef NETSNMP_MIB_HANDLER_TYPEDEF
+#define NETSNMP_MIB_HANDLER_TYPEDEF
 typedef struct netsnmp_mib_handler_s          netsnmp_mib_handler;
 typedef struct netsnmp_handler_registration_s netsnmp_handler_registration;
 typedef struct netsnmp_agent_request_info_s   netsnmp_agent_request_info;
 typedef struct netsnmp_request_info_s         netsnmp_request_info;
+#endif
 
 // C++ standard library
 #include <string>

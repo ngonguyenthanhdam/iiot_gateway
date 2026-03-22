@@ -217,6 +217,7 @@ ok "SQLite3 installed: $(sqlite3 --version | cut -d' ' -f1)"
 info "Installing net-snmp..."
 apt-get install -y -qq \
     libsnmp-dev \
+    libssl-dev \
     snmp \
     snmpd \
     snmp-mibs-downloader
