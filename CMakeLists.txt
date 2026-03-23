@@ -90,7 +90,7 @@ if(NETSNMP_CONFIG)
     # net-snmp-config --cflags injects -Werror=implicit-function-declaration,
     # which is a C-only flag invalid for C++ (cc1plus rejects it with a warning).
     # Strip it from the list before passing flags to our C++ target.
-    #list(FILTER NETSNMP_CFLAGS_LIST EXCLUDE REGEX "-Werror=implicit-function-declaration") 
+    #list(FILTER NETSNMP_CFLAGS_LIST EXCLUDE REGEX "-Werror=implicit-function-declaration")
 else()
     find_library(NETSNMP_LIBS netsnmp REQUIRED)
     find_path(NETSNMP_INCLUDE_DIR net-snmp/net-snmp-config.h REQUIRED)

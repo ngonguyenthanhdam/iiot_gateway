@@ -28,7 +28,9 @@
 #include <net-snmp/library/snmpusm.h>
 
 #include "SnmpAgent.h"
-
+namespace IndustrialGateway {
+    class SnmpAgent;
+}
 // C standard library (needed for net-snmp internals)
 #include <cstring>      // memcpy, memset
 #include <cstdio>       // snprintf
