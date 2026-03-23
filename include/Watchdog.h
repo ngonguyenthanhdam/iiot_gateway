@@ -271,5 +271,4 @@ private:
 };
 
 } // namespace IndustrialGateway
-
 #endif // WATCHDOG_H
