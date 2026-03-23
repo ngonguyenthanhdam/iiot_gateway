@@ -22,7 +22,7 @@
 //   2. net-snmp-includes.h — core types: oid, u_char, netsnmp_session, etc.
 //   3. net-snmp-agent-includes.h — agent API: handler registration, MIB ops
 // ---------------------------------------------------------------------------
-
+#include "SnmpAgent.h"
 extern "C" {
     #include <net-snmp/net-snmp-config.h>
     #include <net-snmp/net-snmp-includes.h>
@@ -30,7 +30,6 @@ extern "C" {
     #include <net-snmp/library/snmpusm.h>
 }
 
-#include "SnmpAgent.h"
 // C standard library (needed for net-snmp internals)
 #include <cstring>      // memcpy, memset
 #include <cstdio>       // snprintf
