@@ -66,46 +66,32 @@
 #define SNMP_AGENT_H
 
 // ---------------------------------------------------------------------------
-// net-snmp forward declarations
+// net-snmp isolation
 //
-// The full net-snmp agent headers (#include <net-snmp/agent/...>) are ONLY
-// included in SnmpAgent.cpp.  Pulling them into this header would inject the
-// entire net-snmp agent API into every translation unit that includes
-// SnmpAgent.h (DataProcessor, MqttClient, Watchdog, main), causing cascading
-// redefinition and type-mismatch errors from net-snmp's internal C macros.
-//
-// Only the four struct types that appear in the static callback signature
-// need to be visible here; forward declarations are sufficient because the
-// header never dereferences any of these pointers.
-// ---------------------------------------------------------------------------
-struct netsnmp_mib_handler_s;
-struct netsnmp_handler_registration_s;
-struct netsnmp_agent_request_info_s;
-struct netsnmp_request_info_s;
-
-// Bring the canonical typedef names into scope so the callback declaration
-// below compiles cleanly.
-//
-// When SnmpAgent.h is included in SnmpAgent.cpp, the three net-snmp headers
-// have already been included before this header:
-//   #include <net-snmp/net-snmp-config.h>   → defines NET_SNMP_CONFIG_H
+// ALL three net-snmp headers are included ONLY in SnmpAgent.cpp, in this
+// mandatory order:
+//   #include <net-snmp/net-snmp-config.h>
 //   #include <net-snmp/net-snmp-includes.h>
 //   #include <net-snmp/agent/net-snmp-agent-includes.h>
-// Those headers already define netsnmp_mib_handler etc. as typedefs, so our
-// definitions here would be a redefinition error.
 //
-// In every other translation unit (DataProcessor, MqttClient, main …) the
-// net-snmp headers are NOT included, so NET_SNMP_CONFIG_H is not defined and
-// we must provide the typedefs ourselves.
+// This header deliberately contains ZERO net-snmp includes and ZERO
+// forward declarations for net-snmp types.  Every previous attempt to
+// forward-declare netsnmp_* structs or guard typedef re-definitions with
+// macros failed because:
+//   • The macro net-snmp uses to guard net-snmp-config.h differs by
+//     distro and version (NETSNMP_NET_SNMP_CONFIG_H, __NETSNMP_..., etc.)
+//   • Any #ifndef guard we invent will never match net-snmp's own internal
+//     guard, so the typedef block runs in SnmpAgent.cpp too, causing
+//     "typedef redefinition" errors that break the entire include chain.
 //
-// Guarding on NET_SNMP_CONFIG_H — net-snmp's own top-level inclusion sentinel
-// — is the cross-version-safe way to detect whether the real typedefs exist.
-#ifndef NET_SNMP_CONFIG_H
-typedef struct netsnmp_mib_handler_s          netsnmp_mib_handler;
-typedef struct netsnmp_handler_registration_s netsnmp_handler_registration;
-typedef struct netsnmp_agent_request_info_s   netsnmp_agent_request_info;
-typedef struct netsnmp_request_info_s         netsnmp_request_info;
-#endif
+// Solution: the one class method that needs net-snmp pointer types in its
+// signature (oidHandlerCallback) uses void* parameters here.  The .cpp
+// implementation casts them to the real netsnmp_* types internally.
+// This is safe because:
+//   • The callback is registered with netsnmp_create_handler_registration()
+//     which accepts a C function pointer — the cast is transparent.
+//   • No caller outside SnmpAgent.cpp ever invokes the callback directly.
+// ---------------------------------------------------------------------------
 
 // C++ standard library
 #include <string>
@@ -372,16 +358,23 @@ private:
     int getOrCreateNodeIndex(const std::string& nodeId);
 
     // =========================================================================
-    // Static OID handler trampolines
+    // Static OID handler trampoline
     //
-    // net-snmp requires C-linkage handler functions.  These static methods
-    // extract the SnmpAgent* from the handler registration's magic field and
-    // delegate to the instance-method handler.
+    // net-snmp requires a plain C function pointer for MIB handler callbacks.
+    // The four parameters are net-snmp internal types (netsnmp_mib_handler*,
+    // netsnmp_handler_registration*, etc.) that must NOT appear in this header
+    // (see isolation note at the top of the file).
+    //
+    // The signature here uses void* for all four parameters.  In SnmpAgent.cpp
+    // the function is defined with the real net-snmp types and registered via
+    // a reinterpret_cast to the Netsnmp_Node_Handler function-pointer typedef.
+    // This is safe because the callback is only ever invoked by net-snmp's own
+    // dispatcher — no external code calls it directly.
     // =========================================================================
-    static int oidHandlerCallback(netsnmp_mib_handler*          handler,
-                                  netsnmp_handler_registration* reginfo,
-                                  netsnmp_agent_request_info*   reqinfo,
-                                  netsnmp_request_info*         requests);
+    static int oidHandlerCallback(void* handler,
+                                  void* reginfo,
+                                  void* reqinfo,
+                                  void* requests);
 
     // =========================================================================
     // Agent event-loop thread
@@ -422,9 +415,10 @@ private:
     int64_t m_startEpoch;   ///< Unix epoch seconds when init() was called
 
     // ── Registered handler list (for cleanup in shutdown()) ───────────────────
-    // We store the registration pointers so we can call
+    // Stored as void* to avoid net-snmp types in this header.
+    // SnmpAgent.cpp casts back to netsnmp_handler_registration* when calling
     // netsnmp_unregister_handler() during shutdown.
-    std::vector<netsnmp_handler_registration*> m_registrations;
+    std::vector<void*> m_registrations;
 };
 
 } // namespace IndustrialGateway

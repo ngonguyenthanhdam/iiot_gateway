@@ -230,10 +230,13 @@ void SnmpAgent::shutdown() {
         cout << nowStr() << " [SNMP] Agent thread joined.\n";
     }
 
-    // Deregister all OID handlers
-    for (auto* reg : m_registrations) {
-        if (reg) {
-            netsnmp_unregister_handler(reg);
+    // Deregister all OID handlers.
+    // m_registrations stores void* (header avoids net-snmp types);
+    // cast back to the real type here where the net-snmp headers are available.
+    for (auto* vp : m_registrations) {
+        if (vp) {
+            netsnmp_unregister_handler(
+                static_cast<netsnmp_handler_registration*>(vp));
         }
     }
     m_registrations.clear();
@@ -410,11 +413,15 @@ void SnmpAgent::registerOids() {
             // as the last byte of nodeId for simplicity. We encode as decimal.
             ctx->nodeId = to_string(nodeIdx);
 
-            // Create the handler registration
+            // Create the handler registration.
+            // Pass oidHandlerImpl (which has the real net-snmp parameter types)
+            // directly.  oidHandlerCallback is the void* trampoline declared in
+            // the header; it is only needed there to avoid net-snmp types leaking
+            // into other translation units.
             netsnmp_handler_registration* reg =
                 netsnmp_create_handler_registration(
                     regName.c_str(),
-                    SnmpAgent::oidHandlerCallback,
+                    oidHandlerImpl,
                     fullOid,
                     fullOidLen,
                     HANDLER_CAN_RONLY    // read-only scalars
@@ -440,7 +447,7 @@ void SnmpAgent::registerOids() {
                              " for " << regName
                           << " rc=" << rc << "\n";
             } else {
-                m_registrations.push_back(reg);
+                m_registrations.push_back(static_cast<void*>(reg));
             }
         }
     }
@@ -466,10 +473,16 @@ void SnmpAgent::registerOids() {
 //   the sentinel value 0xEE (238) to signal "hardware error / no data".
 //   This matches the 0xEE convention described in the spec.
 // =============================================================================
-int SnmpAgent::oidHandlerCallback(netsnmp_mib_handler*          handler,
-                                  netsnmp_handler_registration* reginfo,
-                                  netsnmp_agent_request_info*   reqinfo,
-                                  netsnmp_request_info*         requests)
+// The header declares this with void* parameters to avoid pulling net-snmp
+// types into every translation unit.  Here in the .cpp we have the full
+// net-snmp headers, so we define an internal implementation function with
+// the real types and register THAT with net-snmp.  oidHandlerCallback (the
+// void* version from the header) is the public trampoline that net-snmp
+// calls; it immediately forwards to this properly-typed implementation.
+static int oidHandlerImpl(netsnmp_mib_handler*          handler,
+                          netsnmp_handler_registration* reginfo,
+                          netsnmp_agent_request_info*   reqinfo,
+                          netsnmp_request_info*         requests)
 {
     // Only handle GET operations (GETNEXT is handled by net-snmp internally
     // for scalar OIDs registered with netsnmp_register_scalar).
@@ -561,9 +574,21 @@ int SnmpAgent::oidHandlerCallback(netsnmp_mib_handler*          handler,
     return SNMP_ERR_NOERROR;
 }
 
-// =============================================================================
-// MIB update interface
-// =============================================================================
+// oidHandlerCallback — void* trampoline declared in the header.
+// Casts all four parameters to their real net-snmp types and delegates to
+// the fully-typed oidHandlerImpl above.
+int SnmpAgent::oidHandlerCallback(void* handler,
+                                   void* reginfo,
+                                   void* reqinfo,
+                                   void* requests)
+{
+    return oidHandlerImpl(
+        static_cast<netsnmp_mib_handler*>         (handler),
+        static_cast<netsnmp_handler_registration*>(reginfo),
+        static_cast<netsnmp_agent_request_info*>  (reqinfo),
+        static_cast<netsnmp_request_info*>        (requests)
+    );
+}
 
 // -----------------------------------------------------------------------------
 // updateMetrics
