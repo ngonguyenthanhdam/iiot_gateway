@@ -26,7 +26,7 @@
 #include <net-snmp/net-snmp-includes.h>
 #include <net-snmp/agent/net-snmp-agent-includes.h>
 #include <net-snmp/library/snmpusm.h>
-#include <net-snmp/agent/agent_user.h>
+
 #include "SnmpAgent.h"
 
 // C standard library (needed for net-snmp internals)
@@ -34,6 +34,7 @@
 #include <cstdio>       // snprintf
 #include <optional>
 #include <atomic>
+
 // C++ standard library
 #include <iostream>
 #include <sstream>
@@ -43,6 +44,8 @@
 #include <stdexcept>
 #include <algorithm>    // min
 #include <vector>
+#include <thread>       // std::thread — required for m_agentThread
+#include <mutex>        // std::mutex, std::lock_guard — required for m_metricsMutex
 
 using namespace std;
 
