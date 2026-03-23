@@ -62,8 +62,8 @@
 //  • updateMetrics() / sendTrap() never throw; failures are logged to stderr.
 // =============================================================================
 
-#ifndef SNMP_AGENT_H
-#define SNMP_AGENT_H
+#ifndef IIOT_GATEWAY_SNMP_AGENT_H
+#define IIOT_GATEWAY_SNMP_AGENT_H
 
 // ---------------------------------------------------------------------------
 // net-snmp isolation
@@ -441,4 +441,4 @@ private:
 
 } // namespace IndustrialGateway
 
-#endif // SNMP_AGENT_H
+#endif // IIOT_GATEWAY_SNMP_AGENT_H 
