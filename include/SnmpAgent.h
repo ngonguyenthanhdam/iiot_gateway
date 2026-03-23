@@ -105,6 +105,18 @@
 #include <memory>          // std::unique_ptr
 #include <vector>          // std::vector<netsnmp_handler_registration*>
 
+// net-snmp opaque type forward declarations (header-only isolation)
+struct netsnmp_handler_registration_s;
+struct netsnmp_mib_handler_s;
+struct netsnmp_agent_request_info_s;
+struct netsnmp_request_info_s;
+
+// net-snmp typedef aliases (very lightweight and non-owning)
+typedef netsnmp_handler_registration_s netsnmp_handler_registration;
+typedef netsnmp_mib_handler_s netsnmp_mib_handler;
+typedef netsnmp_agent_request_info_s netsnmp_agent_request_info;
+typedef netsnmp_request_info_s netsnmp_request_info;
+
 // Project types
 #include "models/SensorData.h"   // DeviceStatus
 
@@ -376,6 +388,13 @@ private:
                                   void* reqinfo,
                                   void* requests);
 
+    // Allow the internal C-style SNMP callback implementation to access
+    // the agent's private caches for safe lock-protected reads.
+    friend int oidHandlerImpl(netsnmp_mib_handler*          handler,
+                              netsnmp_handler_registration* reginfo,
+                              netsnmp_agent_request_info*   reqinfo,
+                              netsnmp_request_info*         requests);
+
     // =========================================================================
     // Agent event-loop thread
     // =========================================================================
@@ -415,10 +434,9 @@ private:
     int64_t m_startEpoch;   ///< Unix epoch seconds when init() was called
 
     // ── Registered handler list (for cleanup in shutdown()) ───────────────────
-    // Stored as void* to avoid net-snmp types in this header.
-    // SnmpAgent.cpp casts back to netsnmp_handler_registration* when calling
-    // netsnmp_unregister_handler() during shutdown.
-    std::vector<void*> m_registrations;
+    // Stored as opaque net-snmp structure pointers. SnmpAgent.cpp owns and
+    // manipulates the pointers using the net-snmp API.
+    std::vector<netsnmp_handler_registration*> m_registrations;
 };
 
 } // namespace IndustrialGateway

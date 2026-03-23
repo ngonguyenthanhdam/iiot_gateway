@@ -234,10 +234,9 @@ void SnmpAgent::shutdown() {
     // Deregister all OID handlers.
     // m_registrations stores void* (header avoids net-snmp types);
     // cast back to the real type here where the net-snmp headers are available.
-    for (auto* vp : m_registrations) {
-        if (vp) {
-            netsnmp_unregister_handler(
-                static_cast<netsnmp_handler_registration*>(vp));
+    for (auto* reg : m_registrations) {
+        if (reg) {
+            netsnmp_unregister_handler(reg);
         }
     }
     m_registrations.clear();
@@ -448,7 +447,7 @@ void SnmpAgent::registerOids() {
                              " for " << regName
                           << " rc=" << rc << "\n";
             } else {
-                m_registrations.push_back(static_cast<void*>(reg));
+                m_registrations.push_back(reg);
             }
         }
     }
