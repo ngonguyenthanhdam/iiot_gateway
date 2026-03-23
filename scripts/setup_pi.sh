@@ -374,7 +374,7 @@ VERIFY_FAILED=0
 check_header() {
     local header="$1"
     local desc="$2"
-    if find /usr/include /usr/local/include -name "$header" 2>/dev/null | grep -q .; then
+    if [[ -f "/usr/include/$header" || -f "/usr/local/include/$header" ]]; then
         ok "$desc ($header)"
     else
         err "MISSING: $desc header not found: $header"
