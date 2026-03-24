@@ -354,6 +354,103 @@ void SnmpAgent::createUsmUser() {
               << "' created (SHA auth, AES priv).\n";
 }
 
+
+int oidHandlerImpl(netsnmp_mib_handler*          handler,
+                          netsnmp_handler_registration* reginfo,
+                          netsnmp_agent_request_info*   reqinfo,
+                          netsnmp_request_info*         requests)
+{
+    // Only handle GET operations (GETNEXT is handled by net-snmp internally
+    // for scalar OIDs registered with netsnmp_register_scalar).
+    if (reqinfo->mode != MODE_GET) {
+        return SNMP_ERR_NOERROR;
+    }
+
+    // Recover our context from the registration
+    if (!reginfo || !reginfo->my_reg_void) {
+        netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_GENERR);
+        return SNMP_ERR_GENERR;
+    }
+
+    auto* ctx   = static_cast<HandlerContext*>(reginfo->my_reg_void);
+    SnmpAgent* self = ctx->agent;
+    int nodeIdx = stoi(ctx->nodeId);   // 1-based slot index
+    oid column  = ctx->column;
+
+    // Look up the nodeId for this index slot
+    string nodeId;
+    NodeMetrics metrics{};
+    bool found = false;
+
+    {
+        lock_guard<mutex> lock(self->m_metricsMutex);
+        for (const auto& [nid, idx] : self->m_nodeIndex) {
+            if (idx == nodeIdx) {
+                nodeId = nid;
+                auto it = self->m_metricsCache.find(nid);
+                if (it != self->m_metricsCache.end()) {
+                    metrics = it->second;
+                    found   = true;
+                }
+                break;
+            }
+        }
+    }
+
+    // Sentinel for unallocated node slots or sensors not fitted
+    constexpr long k_noData = 0xEE;
+
+    if (!found) {
+        // Slot not yet assigned to a live node — return sentinel
+        snmp_set_var_typed_integer(requests->requestvb,
+                                   ASN_INTEGER,
+                                   k_noData);
+        return SNMP_ERR_NOERROR;
+    }
+
+    // Encode the requested column
+    switch (column) {
+        case k_colStatus: {
+            // Integer32: DeviceStatus ordinal (0=OPERATIONAL … 4=OFFLINE)
+            snmp_set_var_typed_integer(requests->requestvb,
+                                       ASN_INTEGER,
+                                       static_cast<long>(metrics.deviceStatus));
+            break;
+        }
+        case k_colTemp: {
+            // Gauge32: temperature × 10, or 0xEE if no sensor
+            long val = metrics.hasTemp ? static_cast<long>(metrics.temperature10)
+                                       : k_noData;
+            snmp_set_var_typed_integer(requests->requestvb,
+                                       ASN_GAUGE,
+                                       val);
+            break;
+        }
+        case k_colHumi: {
+            // Gauge32: humidity × 10, or 0xEE if no sensor
+            long val = metrics.hasHumi ? static_cast<long>(metrics.humidity10)
+                                       : k_noData;
+            snmp_set_var_typed_integer(requests->requestvb,
+                                       ASN_GAUGE,
+                                       val);
+            break;
+        }
+        case k_colAlert: {
+            // Integer32: 0=clear, 1=alert active
+            snmp_set_var_typed_integer(requests->requestvb,
+                                       ASN_INTEGER,
+                                       static_cast<long>(metrics.alertState));
+            break;
+        }
+        default:
+            netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_NOSUCHNAME);
+            return SNMP_ERR_NOSUCHNAME;
+    }
+
+    return SNMP_ERR_NOERROR;
+}
+
+
 // -----------------------------------------------------------------------------
 // registerOids
 //
@@ -479,100 +576,7 @@ void SnmpAgent::registerOids() {
 // the real types and register THAT with net-snmp.  oidHandlerCallback (the
 // void* version from the header) is the public trampoline that net-snmp
 // calls; it immediately forwards to this properly-typed implementation.
-int oidHandlerImpl(netsnmp_mib_handler*          handler,
-                          netsnmp_handler_registration* reginfo,
-                          netsnmp_agent_request_info*   reqinfo,
-                          netsnmp_request_info*         requests)
-{
-    // Only handle GET operations (GETNEXT is handled by net-snmp internally
-    // for scalar OIDs registered with netsnmp_register_scalar).
-    if (reqinfo->mode != MODE_GET) {
-        return SNMP_ERR_NOERROR;
-    }
 
-    // Recover our context from the registration
-    if (!reginfo || !reginfo->my_reg_void) {
-        netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_GENERR);
-        return SNMP_ERR_GENERR;
-    }
-
-    auto* ctx   = static_cast<HandlerContext*>(reginfo->my_reg_void);
-    SnmpAgent* self = ctx->agent;
-    int nodeIdx = stoi(ctx->nodeId);   // 1-based slot index
-    oid column  = ctx->column;
-
-    // Look up the nodeId for this index slot
-    string nodeId;
-    NodeMetrics metrics{};
-    bool found = false;
-
-    {
-        lock_guard<mutex> lock(self->m_metricsMutex);
-        for (const auto& [nid, idx] : self->m_nodeIndex) {
-            if (idx == nodeIdx) {
-                nodeId = nid;
-                auto it = self->m_metricsCache.find(nid);
-                if (it != self->m_metricsCache.end()) {
-                    metrics = it->second;
-                    found   = true;
-                }
-                break;
-            }
-        }
-    }
-
-    // Sentinel for unallocated node slots or sensors not fitted
-    constexpr long k_noData = 0xEE;
-
-    if (!found) {
-        // Slot not yet assigned to a live node — return sentinel
-        snmp_set_var_typed_integer(requests->requestvb,
-                                   ASN_INTEGER,
-                                   k_noData);
-        return SNMP_ERR_NOERROR;
-    }
-
-    // Encode the requested column
-    switch (column) {
-        case k_colStatus: {
-            // Integer32: DeviceStatus ordinal (0=OPERATIONAL … 4=OFFLINE)
-            snmp_set_var_typed_integer(requests->requestvb,
-                                       ASN_INTEGER,
-                                       static_cast<long>(metrics.deviceStatus));
-            break;
-        }
-        case k_colTemp: {
-            // Gauge32: temperature × 10, or 0xEE if no sensor
-            long val = metrics.hasTemp ? static_cast<long>(metrics.temperature10)
-                                       : k_noData;
-            snmp_set_var_typed_integer(requests->requestvb,
-                                       ASN_GAUGE,
-                                       val);
-            break;
-        }
-        case k_colHumi: {
-            // Gauge32: humidity × 10, or 0xEE if no sensor
-            long val = metrics.hasHumi ? static_cast<long>(metrics.humidity10)
-                                       : k_noData;
-            snmp_set_var_typed_integer(requests->requestvb,
-                                       ASN_GAUGE,
-                                       val);
-            break;
-        }
-        case k_colAlert: {
-            // Integer32: 0=clear, 1=alert active
-            snmp_set_var_typed_integer(requests->requestvb,
-                                       ASN_INTEGER,
-                                       static_cast<long>(metrics.alertState));
-            break;
-        }
-        default:
-            netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_NOSUCHNAME);
-            return SNMP_ERR_NOSUCHNAME;
-    }
-
-    return SNMP_ERR_NOERROR;
-}
 
 // oidHandlerCallback — void* trampoline declared in the header.
 // Casts all four parameters to their real net-snmp types and delegates to
