@@ -80,16 +80,19 @@ if(NETSNMP_CONFIG)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     execute_process(
+        COMMAND ${NETSNMP_CONFIG} --agent-libs
+        OUTPUT_VARIABLE NETSNMP_AGENT_LIBS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
         COMMAND ${NETSNMP_CONFIG} --cflags
         OUTPUT_VARIABLE NETSNMP_CFLAGS
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    separate_arguments(NETSNMP_LIBS_LIST   UNIX_COMMAND "${NETSNMP_LIBS}")
+    separate_arguments(NETSNMP_LIBS_LIST UNIX_COMMAND "${NETSNMP_LIBS}")
+    separate_arguments(NETSNMP_AGENT_LIBS_LIST UNIX_COMMAND "${NETSNMP_AGENT_LIBS}")
     separate_arguments(NETSNMP_CFLAGS_LIST UNIX_COMMAND "${NETSNMP_CFLAGS}")
 
-    # net-snmp-config --cflags injects -Werror=implicit-function-declaration,
-    # which is a C-only flag invalid for C++ (cc1plus rejects it with a warning).
-    # Strip it from the list before passing flags to our C++ target.
     list(FILTER NETSNMP_CFLAGS_LIST EXCLUDE REGEX "-Werror=implicit-function-declaration")
     execute_process(
         COMMAND ${NETSNMP_CONFIG} --prefix
@@ -97,15 +100,13 @@ if(NETSNMP_CONFIG)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
     set(NETSNMP_INCLUDE_DIR "${NETSNMP_PREFIX}/include")
-    
-    message(STATUS "Net-SNMP found via config: ${NETSNMP_CONFIG}")
 else()
     find_library(NETSNMP_LIBS netsnmp REQUIRED)
     find_path(NETSNMP_INCLUDE_DIR net-snmp/net-snmp-config.h REQUIRED)
     set(NETSNMP_CFLAGS_LIST "")
-    set(NETSNMP_LIBS_LIST   ${NETSNMP_LIBS})
+    set(NETSNMP_LIBS_LIST ${NETSNMP_LIBS})
+    set(NETSNMP_AGENT_LIBS_LIST "")
 endif()
-target_include_directories(${PROJECT_NAME} PRIVATE ${NETSNMP_INCLUDE_DIR})
 
 # --- 5. nlohmann/json --------------------------------------------------------
 # Install via: sudo apt install nlohmann-json3-dev
@@ -136,11 +137,12 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    ${MOSQUITTOPP_LIB}          # libmosquittopp — C++ MQTT wrapper
-    ${MOSQUITTO_LIB}            # libmosquitto   — underlying C library
-    ${SQLITE3_LIBRARIES}        # libsqlite3
-    ${NETSNMP_LIBS_LIST}        # libnetsnmp (+ agent/helpers as reported by net-snmp-config)
-    Threads::Threads            # pthreads
+    ${MOSQUITTOPP_LIB}
+    ${MOSQUITTO_LIB}
+    ${SQLITE3_LIBRARIES}
+    ${NETSNMP_AGENT_LIBS_LIST}
+    ${NETSNMP_LIBS_LIST}
+    Threads::Threads
     $<$<TARGET_EXISTS:nlohmann_json::nlohmann_json>:nlohmann_json::nlohmann_json>
 )
 
