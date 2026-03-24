@@ -273,10 +273,10 @@ void SnmpAgent::createUsmUser() {
               << m_config.securityName << "'...\n";
 
     // Allocate a new USM user struct (net-snmp will own this memory)
-    struct usmUser* user = usm_new_user();
+    struct usmUser* user = usm_create_user();
     if (!user) {
         throw runtime_error(
-            "[SnmpAgent] usm_new_user() returned null"
+            "[SnmpAgent] usm_create_user() returned null"
         );
     }
 
@@ -287,8 +287,8 @@ void SnmpAgent::createUsmUser() {
     // ── Authentication protocol: SHA-1 ───────────────────────────────────────
     user->authProtocol =
         snmp_duplicate_objid(usmHMACSHA1AuthProtocol,
-                             USM_LENGTH_OID_TRANSFORM);
-    user->authProtocolLen = USM_LENGTH_OID_TRANSFORM;
+                             USM_AUTH_PROTO_SHA_LEN);
+    user->authProtocolLen = USM_AUTH_PROTO_SHA_LEN;
 
     // Derive the localised authentication key from the plain-text password.
     // generate_Ku() implements RFC 2574 §2.6 (password-to-key algorithm).
@@ -300,7 +300,7 @@ void SnmpAgent::createUsmUser() {
     }
 
     int rc = generate_Ku(usmHMACSHA1AuthProtocol,
-                         USM_LENGTH_OID_TRANSFORM,
+                         USM_AUTH_PROTO_SHA_LEN,
                          reinterpret_cast<const u_char*>(m_config.authPass.c_str()),
                          m_config.authPass.size(),
                          user->authKey,
@@ -316,8 +316,8 @@ void SnmpAgent::createUsmUser() {
     // ── Privacy protocol: AES-128 ─────────────────────────────────────────────
     user->privProtocol =
         snmp_duplicate_objid(usmAESPrivProtocol,
-                             USM_LENGTH_OID_TRANSFORM);
-    user->privProtocolLen = USM_LENGTH_OID_TRANSFORM;
+                             USM_AUTH_PROTO_SHA_LEN);
+    user->privProtocolLen = USM_AUTH_PROTO_SHA_LEN;
 
     // Derive the localised privacy key from the plain-text privacy password.
     size_t privKeyLen = USM_PRIV_KU_LEN;
@@ -328,7 +328,7 @@ void SnmpAgent::createUsmUser() {
     }
 
     rc = generate_Ku(usmHMACSHA1AuthProtocol,  // AES key derivation also uses SHA
-                     USM_LENGTH_OID_TRANSFORM,
+                     USM_AUTH_PROTO_SHA_LEN,
                      reinterpret_cast<const u_char*>(m_config.privPass.c_str()),
                      m_config.privPass.size(),
                      user->privKey,
@@ -479,7 +479,7 @@ void SnmpAgent::registerOids() {
 // the real types and register THAT with net-snmp.  oidHandlerCallback (the
 // void* version from the header) is the public trampoline that net-snmp
 // calls; it immediately forwards to this properly-typed implementation.
-static int oidHandlerImpl(netsnmp_mib_handler*          handler,
+int oidHandlerImpl(netsnmp_mib_handler*          handler,
                           netsnmp_handler_registration* reginfo,
                           netsnmp_agent_request_info*   reqinfo,
                           netsnmp_request_info*         requests)
@@ -732,14 +732,14 @@ void SnmpAgent::sendTrap(TrapType           trapType,
     // Authentication: SHA-1
     sessionParams.securityAuthProto    =
         const_cast<oid*>(usmHMACSHA1AuthProtocol);
-    sessionParams.securityAuthProtoLen = USM_LENGTH_OID_TRANSFORM;
+    sessionParams.securityAuthProtoLen = USM_AUTH_PROTO_SHA_LEN;
 
     // Copy the auth passphrase into the session for key derivation
     sessionParams.securityAuthKeyLen = USM_AUTH_KU_LEN;
     memset(sessionParams.securityAuthKey, 0, USM_AUTH_KU_LEN);
     size_t authKeyLen = USM_AUTH_KU_LEN;
     generate_Ku(usmHMACSHA1AuthProtocol,
-                USM_LENGTH_OID_TRANSFORM,
+                USM_AUTH_PROTO_SHA_LEN,
                 reinterpret_cast<const u_char*>(m_config.authPass.c_str()),
                 m_config.authPass.size(),
                 sessionParams.securityAuthKey,
@@ -749,13 +749,13 @@ void SnmpAgent::sendTrap(TrapType           trapType,
     // Privacy: AES-128
     sessionParams.securityPrivProto    =
         const_cast<oid*>(usmAESPrivProtocol);
-    sessionParams.securityPrivProtoLen = USM_LENGTH_OID_TRANSFORM;
+    sessionParams.securityPrivProtoLen = USM_AUTH_PROTO_SHA_LEN;
 
     sessionParams.securityPrivKeyLen = USM_PRIV_KU_LEN;
     memset(sessionParams.securityPrivKey, 0, USM_PRIV_KU_LEN);
     size_t privKeyLen = USM_PRIV_KU_LEN;
     generate_Ku(usmHMACSHA1AuthProtocol,
-                USM_LENGTH_OID_TRANSFORM,
+                USM_AUTH_PROTO_SHA_LEN,
                 reinterpret_cast<const u_char*>(m_config.privPass.c_str()),
                 m_config.privPass.size(),
                 sessionParams.securityPrivKey,
