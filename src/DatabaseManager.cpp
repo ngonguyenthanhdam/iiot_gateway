@@ -538,7 +538,6 @@ int64_t DatabaseManager::purgeOldLogs(int retentionDays) {
 // =============================================================================
 // Private Helpers
 // =============================================================================
-
 // -----------------------------------------------------------------------------
 // execSQL — executes a single DDL/DML statement that returns no rows.
 // m_mutex must be held by the caller (called from constructor & initSchema).
