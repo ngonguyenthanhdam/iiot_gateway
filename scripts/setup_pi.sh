@@ -58,14 +58,25 @@ section() { echo -e "\n${BOLD}${CYAN}══════════════�
 DO_UPGRADE=true
 INSTALL_SERVICE=false
 SKIP_MOSQUITTO=false
+INIT_DATABASE=false
+RESET_DATABASE=false
 
 for arg in "$@"; do
     case "$arg" in
-        --no-upgrade)     DO_UPGRADE=false ;;
-        --service)        INSTALL_SERVICE=true ;;
-        --skip-mosquitto) SKIP_MOSQUITTO=true ;;
+        --no-upgrade)      DO_UPGRADE=false ;;
+        --service)         INSTALL_SERVICE=true ;;
+        --skip-mosquitto)  SKIP_MOSQUITTO=true ;;
+        --init-db)         INIT_DATABASE=true ;;
+        --reset-db)        RESET_DATABASE=true ;;
         --help|-h)
-            echo "Usage: sudo $0 [--no-upgrade] [--service] [--skip-mosquitto]"
+            echo "Usage: sudo $0 [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --no-upgrade       Skip apt upgrade (faster)"
+            echo "  --service          Install as systemd service"
+            echo "  --skip-mosquitto   Skip Mosquitto broker setup"
+            echo "  --init-db          Initialize database with demo devices"
+            echo "  --reset-db         Delete old database before init"
             exit 0 ;;
         *)
             err "Unknown option: $arg"
@@ -365,8 +376,162 @@ touch "$PROJECT_ROOT/logs/security_alerts.log"
 ok "Log files pre-created in logs/"
 
 # =============================================================================
-# 5. Verification — confirm every library is findable by the build system
+# 4.5  (Optional) Database initialization and pre-population
 # =============================================================================
+ if $INIT_DATABASE || $RESET_DATABASE; then
+    section "Phase 4.5 — Database Initialization"
+
+    DB_PATH="$PROJECT_ROOT/db/factory_data.db"
+
+    # ── Option to reset (delete old database) ──────────────────────────────────
+    if [[ -f "$DB_PATH" ]]; then
+        if $RESET_DATABASE; then
+            info "Deleting old database: $DB_PATH"
+            rm -f "$DB_PATH"
+            ok "Database deleted."
+        else
+            warn "Database already exists at $DB_PATH"
+            read -r -t 10 -p "$(echo -e "${CYAN}Delete and reinitialize? [y/N] (auto-skip in 10s): ${NC}")" DELETE_DB \
+                || DELETE_DB="n"
+            echo ""
+            if [[ "${DELETE_DB,,}" == "y" ]]; then
+                rm -f "$DB_PATH"
+                ok "Database deleted."
+            else
+                warn "Keeping existing database. Skipping init-db."
+                INIT_DATABASE=false
+            fi
+        fi
+    fi
+
+    if $INIT_DATABASE; then
+        # ── Create the database schema ─────────────────────────────────────────────
+        info "Creating database schema..."
+
+        sqlite3 "$DB_PATH" <<'SCHEMA_SQL'
+-- ========================================================================
+-- Industrial IoT Gateway — Database Schema
+-- Automatically created by setup_pi.sh
+-- ========================================================================
+
+-- Enable foreign key constraints
+PRAGMA foreign_keys=ON;
+
+-- ── Table 1: devices — authorised node whitelist ──────────────────────
+-- Stores all authorized ESP32/ESP8266 nodes that are allowed to send data.
+CREATE TABLE IF NOT EXISTS devices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id     TEXT    NOT NULL UNIQUE,
+    location    TEXT    NOT NULL DEFAULT 'UNKNOWN',
+    sensor_type TEXT    NOT NULL DEFAULT 'UNKNOWN',
+    has_gas     INTEGER NOT NULL DEFAULT 0,
+    last_msg_id INTEGER NOT NULL DEFAULT 0,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Table 2: sensor_logs — time-series sensor readings ────────────────
+-- Stores all accepted sensor readings for historical analysis.
+CREATE TABLE IF NOT EXISTS sensor_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id   INTEGER NOT NULL,
+    temp        REAL,
+    humi        REAL,
+    gas         INTEGER,
+    status      TEXT    NOT NULL,
+    msg_id      INTEGER NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (device_id) REFERENCES devices(id)
+);
+
+-- Performance index for device history queries
+CREATE INDEX IF NOT EXISTS idx_sensor_logs_device_ts
+ON sensor_logs (device_id, timestamp DESC);
+
+-- ── Table 3: system_events — security & fault audit trail ────────────
+-- Immutable forensic log of all security incidents and device faults.
+CREATE TABLE IF NOT EXISTS system_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id     TEXT    NOT NULL,
+    severity    TEXT    NOT NULL,
+    description TEXT    NOT NULL,
+    timestamp   INTEGER NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for events endpoint sorting by recency
+CREATE INDEX IF NOT EXISTS idx_system_events_ts
+ON system_events (timestamp DESC);
+SCHEMA_SQL
+
+        if [[ $? -eq 0 ]]; then
+            ok "Database schema created successfully."
+        else
+            err "Failed to create database schema."
+            exit 1
+        fi
+
+        # ── Pre-populate devices table with demo nodes ──────────────────────────
+        info "Pre-populating devices table with 3 demo nodes..."
+
+        # Default node IDs (can be customized by editing this section)
+        NODE_IDS=(
+            "ESP32_SEC_01"
+            "ESP8266_SEC_02"
+            "ESP8266_SEC_03"
+        )
+
+        NODE_TYPES=(
+            "ENV_MONITOR"
+            "ENV_MONITOR_GAS"
+            "ENV_MONITOR_GAS"
+        )
+
+        NODE_LOCATIONS=(
+            "Factory Floor Main"
+            "Warehouse Section A"
+            "Storage Room B"
+        )
+
+        NODE_GAS_FLAGS=(
+            "0"
+            "1"
+            "1"
+        )
+
+        # Insert each node
+        for i in "${!NODE_IDS[@]}"; do
+            NODE_ID="${NODE_IDS[$i]}"
+            SENSOR_TYPE="${NODE_TYPES[$i]}"
+            LOCATION="${NODE_LOCATIONS[$i]}"
+            HAS_GAS="${NODE_GAS_FLAGS[$i]}"
+
+            sqlite3 "$DB_PATH" <<EOF
+INSERT OR IGNORE INTO devices (node_id, location, sensor_type, has_gas, last_msg_id)
+VALUES ('$NODE_ID', '$LOCATION', '$SENSOR_TYPE', $HAS_GAS, 0);
+EOF
+            if [[ $? -eq 0 ]]; then
+                echo "  ✓ Registered: '$NODE_ID' | type=$SENSOR_TYPE | has_gas=$HAS_GAS | loc='$LOCATION'"
+            else
+                err "Failed to insert node: $NODE_ID"
+            fi
+        done
+
+        ok "Pre-populated 3 demo nodes with last_msg_id=0 (clean start)."
+
+        # ── Verify the database contents ──────────────────────────────────────────
+        info "Verifying database contents..."
+        echo ""
+        echo "  ── Devices Table ──"
+        sqlite3 -header -column "$DB_PATH" "SELECT id, node_id, location, sensor_type, has_gas, last_msg_id FROM devices;"
+        echo ""
+        echo "  ── Table Counts ──"
+        sqlite3 "$DB_PATH" "SELECT 'devices', COUNT(*) FROM devices UNION SELECT 'sensor_logs', COUNT(*) FROM sensor_logs UNION SELECT 'system_events', COUNT(*) FROM system_events;"
+        echo ""
+
+        ok "Database initialization complete: $DB_PATH"
+    fi
+fi
 section "Phase 5 — Library Verification"
 
 VERIFY_FAILED=0
@@ -525,6 +690,11 @@ echo "  2. cmake -S . -B build -DCMAKE_BUILD_TYPE=Release"
 echo "  3. cmake --build build -- -j\$(nproc)"
 echo "  4. ./build/iiot_gateway                    # run from project root"
 echo ""
+echo -e "${BOLD}Database management:${NC}"
+echo "  Initialize demo database:    sudo ./scripts/setup_pi.sh --init-db"
+echo "  Reset + reinit database:     sudo ./scripts/setup_pi.sh --reset-db --init-db"
+echo "  Inspect database manually:   sqlite3 db/factory_data.db"
+echo ""
 if $INSTALL_SERVICE; then
     echo "  (or start the systemd service: sudo systemctl start iiot-gateway)"
     echo ""
@@ -535,7 +705,12 @@ echo "          -a SHA -A auth_password \\"
 echo "          -x AES -X priv_password \\"
 echo "          localhost .1.3.6.1.4.1.9999.1.1.1"
 echo ""
-echo -e "${CYAN}MQTT testing:${NC}"
+echo -e "${CYAN}MQTT testing (with demo devices):${NC}"
+echo "  # Test message from ESP32_SEC_01:"
 echo "  mosquitto_pub -h localhost -t factory/sensors/ESP32_SEC_01/data \\"
 echo "    -m '{\"node_id\":\"ESP32_SEC_01\",\"sensor_type\":\"ENV_MONITOR\",\"payload\":{\"temp\":25.5,\"humi\":45.2},\"status\":\"OPERATIONAL\",\"msg_id\":1,\"timestamp\":1715432000}'"
+echo ""
+echo "  # Test message from ESP8266_SEC_02 (with gas sensor):"
+echo "  mosquitto_pub -h localhost -t factory/sensors/ESP8266_SEC_02/data \\"
+echo "    -m '{\"node_id\":\"ESP8266_SEC_02\",\"sensor_type\":\"ENV_MONITOR_GAS\",\"payload\":{\"temp\":22.3,\"humi\":52.1,\"gas\":456},\"status\":\"OPERATIONAL\",\"msg_id\":1,\"timestamp\":1715432000}'"
 echo ""

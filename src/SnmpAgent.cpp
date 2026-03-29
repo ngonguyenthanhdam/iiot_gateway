@@ -85,6 +85,7 @@ constexpr oid k_colStatus  = 1;
 constexpr oid k_colTemp    = 2;
 constexpr oid k_colHumi    = 3;
 constexpr oid k_colAlert   = 4;
+constexpr oid k_colGas     = 5;      ///< gas sensor level (ADC 0–1023)
 
 // ── OID handler context ───────────────────────────────────────────────────────
 // Passed as the "magic" void* in each handler registration so the static
@@ -442,6 +443,15 @@ int oidHandlerImpl(netsnmp_mib_handler*          handler,
                                        static_cast<long>(metrics.alertState));
             break;
         }
+        case k_colGas: {
+            // Gauge32: gas sensor ADC reading (0–1023), or 0xEE if no sensor
+            long val = metrics.hasGas ? static_cast<long>(metrics.gasValue)
+                                      : k_noData;
+            snmp_set_var_typed_integer(requests->requestvb,
+                                       ASN_GAUGE,
+                                       val);
+            break;
+        }
         default:
             netsnmp_set_request_error(reqinfo, requests, SNMP_ERR_NOSUCHNAME);
             return SNMP_ERR_NOSUCHNAME;
@@ -483,7 +493,7 @@ void SnmpAgent::registerOids() {
               << k_maxNodes << " nodes...\n";
 
     for (int nodeIdx = 1; nodeIdx <= k_maxNodes; ++nodeIdx) {
-        for (oid col : { k_colStatus, k_colTemp, k_colHumi, k_colAlert }) {
+        for (oid col : { k_colStatus, k_colTemp, k_colHumi, k_colAlert, k_colGas }) {
 
             // Build the full OID: .1.3.6.1.4.1.9999.1.<nodeIdx>.<col>
             oid fullOid[MAX_OID_LEN];
@@ -606,11 +616,13 @@ int SnmpAgent::oidHandlerCallback(void* handler,
 //
 // Example:  25.5°C  → Gauge32 = 255
 //           45.2%RH → Gauge32 = 452
+// Gas sensor values are stored as raw ADC readings (0–1023) without scaling.
 // -----------------------------------------------------------------------------
-void SnmpAgent::updateMetrics(const string&       nodeId,
+void SnmpAgent::updateMetrics(const string&        nodeId,
                                optional<float>     temp,
                                optional<float>     humi,
-                               DeviceStatus             status)
+                               optional<int32_t>   gas,
+                               DeviceStatus        status)
 {
     lock_guard<mutex> lock(m_metricsMutex);
 
@@ -645,6 +657,18 @@ void SnmpAgent::updateMetrics(const string&       nodeId,
         m.hasHumi = true;
     } else {
         m.hasHumi = false;
+    }
+
+    // Gas value: raw ADC reading from MQ sensor (0–1023)
+    // -1 (preheat sentinel) is treated as "no data" in the database layer,
+    // so we only see valid ADC values or nullopt here.  Store the raw value
+    // without scaling (SNMP Gauge32 accommodates 0–4294967295).
+    if (gas.has_value() && *gas >= 0) {
+        m.gasValue = *gas;
+        m.hasGas = true;
+    } else {
+        m.gasValue = 0;
+        m.hasGas = false;
     }
 
     // Clear alert state when an OPERATIONAL reading arrives

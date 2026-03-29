@@ -458,6 +458,30 @@ int main(int argc, char* argv[]) {
     //
     // This keeps DataProcessor and SnmpAgent fully decoupled — neither knows
     // the other exists.
+    //
+    // ── New node lifecycle (e.g. ESP8266_SEC_02) ────────────────────────────
+    // Pre-authorization (Phase 1):
+    //   • gateway_config.json lists authorized_devices with node_id
+    //   • DBManager::ensureDeviceExists() creates DB row in devices table
+    //   • Anti-spoofing whitelist is populated before MQTT messages arrive
+    //
+    // First message from authorized node:
+    //   • DataProcessor::checkAntiSpoofing() hits the DB, caches result
+    //   • All 10-step security checks pass (node is in whitelist)
+    //   • SensorReading is cached in DataProcessor::m_deviceCache
+    //   • insertSensorLog() persists to sensor_logs table
+    //
+    // SNMP recognition:
+    //   • This callback extracts updated SensorReading from cache
+    //   • Calls SnmpAgent::updateMetrics() with new metric values
+    //   • SnmpAgent::getOrCreateNodeIndex() auto-allocates a 1-based slot
+    //   • OIDs .1.3.6.1.4.1.9999.1.<slot>.* become queryable by NMS
+    //
+    // Persistent monitoring:
+    //   • updateMetrics() includes temperature, humidity, gas, status fields
+    //   • Watchdog thread continuously monitors all cached nodes
+    //   • New nodes are visible in SNMP GET queries after first accepted packet
+    //   • Device status (OPERATIONAL, OFFLINE, FAULTY) is synchronized in real time
 
     // =========================================================================
     // Phase 4 — MQTT Client initialisation
@@ -496,12 +520,25 @@ int main(int argc, char* argv[]) {
     // The lambda captures shared_ptrs by value so that even if main() somehow
     // returns before the callback fires, the objects remain alive.
     //
-    // Flow per message:
+    // Data flow per message:
     //   1. onRawMessage() runs the full 10-step security pipeline
-    //   2. If accepted, the cache entry for nodeId is updated
-    //   3. We read it back and push to SNMP (non-blocking — cache is lock-free)
-    //   4. We also push to SNMP even on rejection so the alertState is set
-    //      for security events (sendTrap already sets it via setAlertState)
+    //      • JSON parsing (including new 'gas' field from payload)
+    //      • Anti-spoofing check (node must be in devices table)
+    //      • Replay-attack detection (msg_id monotonicity)
+    //      • Anomaly detection (temp/humi jumps, timestamp regression)
+    //      • Accepted readings are cached and persisted to sensor_logs
+    //   2. getCachedReading() retrieves the latest SensorReading
+    //      • Includes temperature, humidity, gasValue, status, etc.
+    //      • gasValue is raw ADC (0–1023) or nullopt if sensor not fitted
+    //   3. updateMetrics() pushes all values to SNMP MIB cache
+    //      • Creates/updates NodeMetrics entry for this device
+    //      • Allocates OID slot if this is first time seeing device
+    //      • Clears alert flag on OPERATIONAL status
+    //      • All fields (temp×10, humi×10, gasValue, status) now available to NMS
+    //   4. Watchdog monitors cache in parallel (separate thread)
+    //      • Detects offline devices (no heartbeat > timeout)
+    //      • Calls updateCachedStatus() to set OFFLINE status
+    //      • Status change triggers sendTrap() to alert NMS
     mqttClient->setMessageCallback(
         [dp  = dataProcessor,
          snmp = snmpAgent]
@@ -535,6 +572,7 @@ int main(int argc, char* argv[]) {
                         nodeId,
                         reading->temperature,
                         reading->humidity,
+                        reading->gasValue,           // NEW: gas sensor ADC reading
                         reading->status
                     );
                 }

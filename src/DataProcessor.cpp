@@ -54,6 +54,7 @@ constexpr const char* kFieldTimestamp   = "timestamp";
 // Nested payload field names
 constexpr const char* kFieldTemp        = "temp";
 constexpr const char* kFieldHumi        = "humi";
+constexpr const char* kFieldGas         = "gas";
 
 } // anonymous namespace
 
@@ -362,6 +363,14 @@ SensorReading DataProcessor::buildReading(const nlohmann::json& doc) const {
     if (pl.contains(kFieldHumi) && pl[kFieldHumi].is_number()) {
         r.humidity = pl[kFieldHumi].get<float>();
     }
+
+    // Gas value: present and numeric? (int32_t ADC reading from MQ sensor)
+    // Only populated for ENV_MONITOR_GAS nodes (ESP8266 with gas sensor).
+    // Value range: 0–1023 for valid ADC readings, or -1 for sensor preheat.
+    if (pl.contains(kFieldGas) && pl[kFieldGas].is_number_integer()) {
+        r.gasValue = pl[kFieldGas].get<int32_t>();
+    }
+    // else: remains nullopt (sensor not fitted, or field omitted)
 
     return r;
 }

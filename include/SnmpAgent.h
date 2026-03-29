@@ -171,8 +171,10 @@ struct NodeMetrics {
     int32_t  temperature10 = 0;      ///< °C × 10  (SNMP Gauge32)
     int32_t  humidity10    = 0;      ///< %RH × 10 (SNMP Gauge32)
     int32_t  alertState    = 0;      ///< 0=clear, 1=alert
+    int32_t  gasValue      = 0;      ///< raw ADC value (0–1023, SNMP Gauge32)
     bool     hasTemp       = false;  ///< false → return 0xEE (no sensor)
     bool     hasHumi       = false;  ///< false → return 0xEE (no sensor)
+    bool     hasGas        = false;  ///< false → return 0xEE (no sensor / preheating)
     int64_t  lastUpdated   = 0;      ///< Gateway epoch when last written
 };
 
@@ -260,11 +262,13 @@ public:
     //   nodeId — matches the devices.node_id column
     //   temp   — std::nullopt for non-ENV nodes
     //   humi   — std::nullopt for non-ENV nodes
+    //   gas    — std::nullopt for nodes without a gas sensor; raw ADC (0–1023)
     //   status — current DeviceStatus
     // -------------------------------------------------------------------------
     void updateMetrics(const std::string&       nodeId,
                        std::optional<float>     temp,
                        std::optional<float>     humi,
+                       std::optional<int32_t>   gas,
                        DeviceStatus             status);
 
     // -------------------------------------------------------------------------

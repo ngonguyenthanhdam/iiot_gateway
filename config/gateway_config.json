@@ -1,12 +1,14 @@
 {
   "_comment": "Industrial IoT Gateway — Runtime Configuration",
-  "_version": "1.0.0",
+  "_version": "1.1.0",
 
   "mqtt": {
     "_comment": "Mosquitto broker runs locally on the Raspberry Pi 4",
     "host": "localhost",
     "port": 1883,
-    "topic": "factory/sensors/+/data",
+    "topic_data":  "factory/sensors/+/data",
+    "topic_alert": "factory/sensors/+/alert",
+    "_comment_topics": "topic_data catches normal telemetry; topic_alert catches immediate alarm/cleared events from gas-capable nodes",
     "client_id": "iiot_gateway_pi4",
     "keep_alive": 60,
     "qos": 1,
@@ -43,10 +45,49 @@
 
   "thresholds": {
     "_comment": "Anomaly detection rules — violations trigger LEVEL_2/3 events",
-    "temp_jump_celsius": 20.0,
-    "humi_jump_percent": 40.0,
-    "temp_warning_high": 45.0,
-    "temp_critical_high": 50.0
+
+    "temp_jump_celsius":  20.0,
+    "humi_jump_percent":  40.0,
+    "temp_warning_high":  45.0,
+    "temp_critical_high": 50.0,
+
+    "gas": {
+      "_comment": "Gas ADC thresholds — raw 10-bit values from ESP8266 A0 (0–1023, Vref=3.3V). Applies only to nodes that carry an MQ-type gas sensor (sensor_type=DHT11+MQ2). gas_warning_high triggers a LEVEL_2 WARNING event; gas_critical_high triggers a LEVEL_3 CRITICAL event and an immediate SNMPv3 trap.",
+      "gas_warning_high":  400,
+      "gas_critical_high": 600,
+      "gas_jump_adc":      200,
+      "_comment_jump": "gas_jump_adc: if gasValue changes by more than this between consecutive readings, treat as anomalous spike (sensor fault or sudden leak)"
+    }
+  },
+
+  "authorized_nodes": {
+    "_comment": "Allowlist of node_id values the gateway will accept. Any message whose node_id is not in this list is rejected and logged as a LEVEL_3 CRITICAL security event (potential rogue device or misconfigured node). Add new nodes here before flashing their firmware.",
+    "nodes": [
+      {
+        "node_id":     "ESP32_SEC_01",
+        "sensor_type": "ENV_MONITOR",
+        "platform":    "ESP32",
+        "location":    "Factory Floor — Sector 01",
+        "has_gas":     false,
+        "_comment":    "DHT11 on GPIO14 only. No MQ gas sensor fitted."
+      },
+      {
+        "node_id":     "ESP8266_SEC_02",
+        "sensor_type": "DHT11+MQ2",
+        "platform":    "ESP8266",
+        "location":    "Factory Floor — Sector 02",
+        "has_gas":     true,
+        "_comment":    "DHT11 on D5 + MQ gas sensor on A0. Gas thresholds apply."
+      },
+      {
+        "node_id":     "ESP8266_SEC_03",
+        "sensor_type": "DHT11+MQ2",
+        "platform":    "ESP8266",
+        "location":    "Factory Floor — Sector 03",
+        "has_gas":     true,
+        "_comment":    "Identical hardware to SEC_02. Same gas thresholds apply."
+      }
+    ]
   },
 
   "recovery": {

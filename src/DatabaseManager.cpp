@@ -180,26 +180,46 @@ DatabaseManager& DatabaseManager::operator=(DatabaseManager&& other) noexcept {
 void DatabaseManager::initSchema() {
     // ------------------------------------------------------------------
     // Table 1: devices — authorised node whitelist
+    //
+    // New columns (v1.1.0):
+    //   sensor_type  TEXT    — e.g. "ENV_MONITOR", "DHT11+MQ2"
+    //   has_gas      INTEGER — 1 if node carries an MQ gas sensor, else 0
+    //   last_msg_id  INTEGER — highest msg_id accepted from this node;
+    //                          updated after every successful insertSensorLog().
+    //                          Enables O(1) replay-attack detection via a
+    //                          primary-key lookup instead of MAX(sensor_logs).
     // ------------------------------------------------------------------
     execSQL(R"SQL(
         CREATE TABLE IF NOT EXISTS devices (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            node_id    TEXT    NOT NULL UNIQUE,
-            location   TEXT    NOT NULL DEFAULT 'UNKNOWN',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id     TEXT    NOT NULL UNIQUE,
+            location    TEXT    NOT NULL DEFAULT 'UNKNOWN',
+            sensor_type TEXT    NOT NULL DEFAULT 'UNKNOWN',
+            has_gas     INTEGER NOT NULL DEFAULT 0,   -- boolean: 0=false, 1=true
+            last_msg_id INTEGER NOT NULL DEFAULT 0,   -- replay-attack high-water mark
+            created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
         );
     )SQL");
 
     // ------------------------------------------------------------------
     // Table 2: sensor_logs — time-series sensor readings
+    //
+    // New column (v1.1.0):
+    //   gas  INTEGER — raw 10-bit ADC value from ESP8266 A0 pin (0–1023).
+    //                  NULL when the node does not carry a gas sensor or
+    //                  when the MQ sensor is still in its preheat phase
+    //                  (device sends -1 during preheat; gateway stores NULL).
+    //                  INTEGER not REAL: ADC values are whole numbers and
+    //                  integer comparisons against thresholds are exact.
     // ------------------------------------------------------------------
     execSQL(R"SQL(
         CREATE TABLE IF NOT EXISTS sensor_logs (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id   INTEGER NOT NULL,
-            temp        REAL,           -- NULL when sensor not present
-            humi        REAL,           -- NULL when sensor not present
-            status      TEXT NOT NULL,
+            temp        REAL,               -- NULL when sensor not present
+            humi        REAL,               -- NULL when sensor not present
+            gas         INTEGER,            -- NULL when no gas sensor / preheating
+            status      TEXT    NOT NULL,
             msg_id      INTEGER NOT NULL,
             timestamp   INTEGER NOT NULL,   -- Unix epoch seconds (from device)
             captured_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -350,11 +370,12 @@ bool DatabaseManager::insertSensorLog(const SensorReading& reading) {
 
     lock_guard<mutex> lock(m_mutex);
 
+    // gas column added at position 4; status, msg_id, timestamp shift to 5/6/7.
     const char* sql = R"SQL(
         INSERT INTO sensor_logs
-            (device_id, temp, humi, status, msg_id, timestamp)
+            (device_id, temp, humi, gas, status, msg_id, timestamp)
         VALUES
-            (?, ?, ?, ?, ?, ?);
+            (?, ?, ?, ?, ?, ?, ?);
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -381,13 +402,22 @@ bool DatabaseManager::insertSensorLog(const SensorReading& reading) {
         sqlite3_bind_null(stmt, 3);
     }
 
-    // Status string
-    string statusStr = deviceStatusToString(reading.status);
-    sqlite3_bind_text(stmt, 4, statusStr.c_str(), -1, SQLITE_TRANSIENT);
+    // Gas — NULL when no sensor fitted OR when value is -1 (preheat sentinel).
+    // Storing -1 as NULL avoids false threshold alerts during sensor warm-up
+    // and keeps the column semantically clean: NULL means "no data", not "0 ppm".
+    if (reading.gasValue.has_value() && *reading.gasValue >= 0) {
+        sqlite3_bind_int(stmt, 4, static_cast<int>(*reading.gasValue));
+    } else {
+        sqlite3_bind_null(stmt, 4);
+    }
 
-    // msg_id and device timestamp
-    sqlite3_bind_int64(stmt, 5, static_cast<int64_t>(reading.msgId));
-    sqlite3_bind_int64(stmt, 6, reading.timestamp);
+    // Status string (param 5)
+    string statusStr = deviceStatusToString(reading.status);
+    sqlite3_bind_text(stmt, 5, statusStr.c_str(), -1, SQLITE_TRANSIENT);
+
+    // msg_id (param 6) and device timestamp (param 7)
+    sqlite3_bind_int64(stmt, 6, static_cast<int64_t>(reading.msgId));
+    sqlite3_bind_int64(stmt, 7, reading.timestamp);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -396,6 +426,10 @@ bool DatabaseManager::insertSensorLog(const SensorReading& reading) {
         logSqliteError("insertSensorLog(step)", rc);
         return false;
     }
+
+    // Keep devices.last_msg_id current so getLastMsgId() is an O(1) PK lookup
+    // instead of a MAX() scan across sensor_logs.  m_mutex is already held.
+    updateLastMsgId(reading.nodeId, reading.msgId);
 
     return true;
 }
@@ -448,30 +482,22 @@ bool DatabaseManager::insertSystemEvent(const SecurityEvent& event) {
 // -----------------------------------------------------------------------------
 // getLastMsgId
 //
-// Queries the highest msg_id ever stored for the given node.
-// DataProcessor calls this after receiving a new packet:
+// Reads devices.last_msg_id directly — a single primary-key lookup (O(1))
+// rather than the previous MAX(sensor_logs.msg_id) JOIN which required a full
+// index scan per call.  This column is kept current by updateLastMsgId() which
+// is called inside every successful insertSensorLog().
 //
+// DataProcessor call pattern:
 //   uint32_t last = db.getLastMsgId(nodeId);
-//   if (incoming.msgId <= last) {
-//       // Replay attack detected — log & discard
-//   }
+//   if (incoming.msgId <= last) → replay attack → log & discard
 //
-// Performance: the idx_sensor_logs_device_ts index makes MAX(msg_id)
-// efficient even with millions of rows.
-//
-// Returns 0 when no rows exist yet (first message from this device is always
-// accepted regardless of its msgId value).
+// Returns 0 when no rows exist yet (first message always accepted).
 // -----------------------------------------------------------------------------
 uint32_t DatabaseManager::getLastMsgId(const string& nodeId) {
     lock_guard<mutex> lock(m_mutex);
 
-    // Sub-select resolves node_id → device_id inline, avoiding a second
-    // round-trip for the FK lookup.
     const char* sql = R"SQL(
-        SELECT COALESCE(MAX(sl.msg_id), 0)
-        FROM   sensor_logs sl
-        JOIN   devices     d  ON d.id = sl.device_id
-        WHERE  d.node_id = ?;
+        SELECT last_msg_id FROM devices WHERE node_id = ?;
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -490,6 +516,176 @@ uint32_t DatabaseManager::getLastMsgId(const string& nodeId) {
 
     sqlite3_finalize(stmt);
     return lastId;
+}
+
+// -----------------------------------------------------------------------------
+// provisionAuthorizedNodes
+//
+// Inserts or updates every entry from the gateway_config.json
+// "authorized_nodes.nodes" array.
+//
+// INSERT OR IGNORE + UPDATE pattern
+// ───────────────────────────────────
+// A plain INSERT OR IGNORE would skip existing rows entirely, leaving location,
+// sensor_type and has_gas stale after a config change.  A plain INSERT OR
+// REPLACE would delete-then-reinsert, resetting last_msg_id to 0 and breaking
+// replay-attack protection across gateway restarts.
+//
+// The correct approach is two statements per node:
+//   1. INSERT OR IGNORE — adds the row if node_id is new; a no-op if it exists.
+//   2. UPDATE ... WHERE node_id = ? — overwrites metadata (location, sensor_type,
+//      has_gas) but deliberately omits last_msg_id so replay state is preserved.
+//
+// Both steps run inside a single BEGIN/COMMIT transaction for atomicity.
+// If any step fails the transaction is rolled back and the method returns -1.
+//
+// Returns: count of nodes successfully provisioned, or -1 on fatal DB error.
+// -----------------------------------------------------------------------------
+int DatabaseManager::provisionAuthorizedNodes(const vector<AuthorizedNode>& nodes) {
+    lock_guard<mutex> lock(m_mutex);
+
+    if (nodes.empty()) {
+        cout << nowStr() << " [DB] provisionAuthorizedNodes: node list is empty — skipped.\n";
+        return 0;
+    }
+
+    // Wrap all inserts/updates in a transaction — atomic on success, fully
+    // rolled back on any error.
+    char* errMsg = nullptr;
+    int rc = sqlite3_exec(m_db, "BEGIN TRANSACTION;", nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        cerr << nowStr() << " [DB] provisionAuthorizedNodes: BEGIN failed: "
+             << (errMsg ? errMsg : "?") << "\n";
+        sqlite3_free(errMsg);
+        return -1;
+    }
+
+    int provisioned = 0;
+
+    for (const auto& node : nodes) {
+        // ── Step 1: Insert if not present ────────────────────────────────────
+        // INSERT OR IGNORE leaves last_msg_id at its DEFAULT 0 for new rows
+        // and does nothing at all for existing rows.
+        const char* insertSql = R"SQL(
+            INSERT OR IGNORE INTO devices
+                (node_id, location, sensor_type, has_gas, last_msg_id)
+            VALUES
+                (?, ?, ?, ?, 0);
+        )SQL";
+
+        sqlite3_stmt* stmt = nullptr;
+        rc = sqlite3_prepare_v2(m_db, insertSql, -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            logSqliteError("provisionAuthorizedNodes(insert/prepare)", rc);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return -1;
+        }
+
+        sqlite3_bind_text(stmt, 1, node.nodeId.c_str(),     -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, node.location.c_str(),   -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, node.sensorType.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 4, node.hasGas ? 1 : 0);
+
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        if (rc != SQLITE_DONE) {
+            logSqliteError("provisionAuthorizedNodes(insert/step) for " + node.nodeId, rc);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return -1;
+        }
+
+        // ── Step 2: Update metadata for existing rows ─────────────────────────
+        // Deliberately excludes last_msg_id — never reset replay-attack state.
+        const char* updateSql = R"SQL(
+            UPDATE devices
+            SET    location    = ?,
+                   sensor_type = ?,
+                   has_gas     = ?
+            WHERE  node_id     = ?;
+        )SQL";
+
+        rc = sqlite3_prepare_v2(m_db, updateSql, -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) {
+            logSqliteError("provisionAuthorizedNodes(update/prepare)", rc);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return -1;
+        }
+
+        sqlite3_bind_text(stmt, 1, node.location.c_str(),   -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, node.sensorType.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 3, node.hasGas ? 1 : 0);
+        sqlite3_bind_text(stmt, 4, node.nodeId.c_str(),     -1, SQLITE_TRANSIENT);
+
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        if (rc != SQLITE_DONE) {
+            logSqliteError("provisionAuthorizedNodes(update/step) for " + node.nodeId, rc);
+            sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+            return -1;
+        }
+
+        ++provisioned;
+        cout << nowStr()
+             << " [DB] Provisioned node: " << node.nodeId
+             << " | type=" << node.sensorType
+             << " | gas=" << (node.hasGas ? "yes" : "no")
+             << " | location=" << node.location << "\n";
+    }
+
+    // Commit the whole batch
+    rc = sqlite3_exec(m_db, "COMMIT;", nullptr, nullptr, &errMsg);
+    if (rc != SQLITE_OK) {
+        cerr << nowStr() << " [DB] provisionAuthorizedNodes: COMMIT failed: "
+             << (errMsg ? errMsg : "?") << "\n";
+        sqlite3_free(errMsg);
+        sqlite3_exec(m_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+        return -1;
+    }
+
+    cout << nowStr()
+         << " [DB] provisionAuthorizedNodes: " << provisioned
+         << " node(s) ready.\n";
+    return provisioned;
+}
+
+// -----------------------------------------------------------------------------
+// updateLastMsgId  (private)
+//
+// Updates devices.last_msg_id to msgId for the given nodeId.
+// Called inside insertSensorLog() with m_mutex already held.
+// Uses MAX semantics: only updates if the new value is strictly greater than
+// the stored value, protecting against out-of-order delivery in edge cases.
+// -----------------------------------------------------------------------------
+bool DatabaseManager::updateLastMsgId(const string& nodeId, uint32_t msgId) {
+    const char* sql = R"SQL(
+        UPDATE devices
+        SET    last_msg_id = ?
+        WHERE  node_id     = ?
+          AND  last_msg_id < ?;
+    )SQL";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        logSqliteError("updateLastMsgId(prepare)", rc);
+        return false;
+    }
+
+    const int64_t msgId64 = static_cast<int64_t>(msgId);
+    sqlite3_bind_int64(stmt, 1, msgId64);
+    sqlite3_bind_text (stmt, 2, nodeId.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmt, 3, msgId64);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        logSqliteError("updateLastMsgId(step)", rc);
+        return false;
+    }
+    return true;
 }
 
 // -----------------------------------------------------------------------------

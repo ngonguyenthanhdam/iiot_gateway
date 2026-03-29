@@ -28,6 +28,7 @@
 
 // C++ standard library
 #include <string>
+#include <vector>       // AuthorizedNode list passed to provisionAuthorizedNodes()
 #include <mutex>
 #include <stdexcept>    // std::runtime_error thrown by constructor
 #include <cstdint>      // uint32_t, int64_t
@@ -39,6 +40,21 @@
 #include "models/SensorData.h"   // SensorReading, SecurityEvent
 
 namespace IndustrialGateway {
+
+// =============================================================================
+// AuthorizedNode
+//
+// Plain data object used to carry one entry from gateway_config.json's
+// "authorized_nodes.nodes" array into provisionAuthorizedNodes().
+// The caller (typically GatewayConfig or main()) parses the JSON and builds
+// this vector; DatabaseManager has no JSON dependency.
+// =============================================================================
+struct AuthorizedNode {
+    std::string nodeId;       ///< e.g. "ESP8266_SEC_02"
+    std::string sensorType;   ///< e.g. "DHT11+MQ2"
+    std::string location;     ///< e.g. "Factory Floor — Sector 02"
+    bool        hasGas;       ///< true if node carries an MQ gas sensor
+};
 
 // =============================================================================
 // DatabaseManager
@@ -140,12 +156,12 @@ public:
     // -------------------------------------------------------------------------
     // getLastMsgId
     //
-    // Queries the maximum msg_id ever stored in `sensor_logs` for the given
-    // node_id.  Used by DataProcessor to detect replay attacks:
+    // Returns the highest msg_id accepted from the given node.
+    // Reads directly from devices.last_msg_id (O(1) primary-key lookup) rather
+    // than scanning sensor_logs with MAX(), making replay detection fast even
+    // with millions of log rows.
     //
-    //   if (incoming.msgId <= getLastMsgId(nodeId)) → replay attack
-    //
-    // Returns: highest known msg_id, or 0 if no records exist yet.
+    // Returns: last accepted msg_id, or 0 if node has never sent a message.
     // -------------------------------------------------------------------------
     uint32_t getLastMsgId(const std::string& nodeId);
 
@@ -159,6 +175,29 @@ public:
     // Returns: number of rows deleted, or -1 on error.
     // -------------------------------------------------------------------------
     int64_t purgeOldLogs(int retentionDays);
+
+    // -------------------------------------------------------------------------
+    // provisionAuthorizedNodes
+    //
+    // Idempotently inserts every entry from the gateway_config.json
+    // "authorized_nodes.nodes" array into the `devices` table.
+    //
+    // Semantics:
+    //   • If a node_id does NOT exist yet → INSERT with all metadata.
+    //   • If a node_id ALREADY exists    → UPDATE location, sensor_type,
+    //     has_gas to the config values, but DO NOT touch last_msg_id.
+    //     This preserves replay-attack state across gateway restarts.
+    //
+    // Called by the constructor immediately after initSchema() so that by the
+    // time the first MQTT packet arrives, isDeviceKnown() will return true for
+    // every provisioned node without requiring DataProcessor involvement.
+    //
+    // Thread safety: acquires m_mutex internally.
+    //
+    // Returns: number of nodes successfully provisioned (inserted or updated).
+    //          Returns -1 if a DB error prevents all provisioning.
+    // -------------------------------------------------------------------------
+    int provisionAuthorizedNodes(const std::vector<AuthorizedNode>& nodes);
 
 private:
     // =========================================================================
@@ -177,6 +216,13 @@ private:
     // that return no rows.  Throws std::runtime_error on failure.
     // -------------------------------------------------------------------------
     void execSQL(const std::string& sql);
+
+    // -------------------------------------------------------------------------
+    // updateLastMsgId — updates devices.last_msg_id for the given node after a
+    // successful insertSensorLog().  m_mutex must already be held by the caller.
+    // Non-throwing: logs and returns false on error.
+    // -------------------------------------------------------------------------
+    bool updateLastMsgId(const std::string& nodeId, uint32_t msgId);
 
     // -------------------------------------------------------------------------
     // logSqliteError — writes a formatted SQLite error to stderr and the
