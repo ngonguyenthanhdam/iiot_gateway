@@ -380,7 +380,7 @@ int oidHandlerImpl(netsnmp_mib_handler*          handler,
 
     // Look up the nodeId for this index slot
     string nodeId;
-    NodeMetrics metrics{};
+    SnmpNodeMetrics metrics{};
     bool found = false;
 
     {
@@ -629,7 +629,7 @@ void SnmpAgent::updateMetrics(const string&        nodeId,
     // Ensure this node has an index slot
     getOrCreateNodeIndex(nodeId);
 
-    NodeMetrics& m = m_metricsCache[nodeId];
+    SnmpNodeMetrics& m = m_metricsCache[nodeId];
 
     // Device status: map enum ordinal directly
     m.deviceStatus = static_cast<int32_t>(status);

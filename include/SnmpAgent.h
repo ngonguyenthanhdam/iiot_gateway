@@ -158,15 +158,20 @@ enum class TrapType : int {
 };
 
 // =============================================================================
-// NodeMetrics — the in-memory MIB value cache for one device.
+// SnmpNodeMetrics — the in-memory SNMP MIB value cache for one device.
+//
+// NOTE: This is distinct from SensorData::NodeMetrics, which tracks general
+// gateway metrics (lastMsgId, replayCount, totalPackets, etc.). SnmpNodeMetrics
+// stores only the values needed for SNMP OID responses.
 //
 // All values are stored in the integer formats required by SNMP:
 //   • temperature and humidity are multiplied by 10 (Gauge32) to preserve
 //     one decimal place without using floating-point SNMP types.
 //   • status maps DeviceStatus enum → Integer32 (0=OK … 4=OFFLINE).
 //   • alertState is 0 (clear) or 1 (alert active).
+//   • gasValue is raw ADC (0–1023).
 // =============================================================================
-struct NodeMetrics {
+struct SnmpNodeMetrics {
     int32_t  deviceStatus  = 0;      ///< DeviceStatus ordinal
     int32_t  temperature10 = 0;      ///< °C × 10  (SNMP Gauge32)
     int32_t  humidity10    = 0;      ///< %RH × 10 (SNMP Gauge32)
@@ -421,9 +426,9 @@ private:
 
     // ── MIB value cache ───────────────────────────────────────────────────────
     // Key   : nodeId string  (e.g. "ESP32_SEC_01")
-    // Value : NodeMetrics struct with the latest SNMP-encodable values
-    mutable std::mutex                             m_metricsMutex;
-    std::unordered_map<std::string, NodeMetrics>   m_metricsCache;
+    // Value : SnmpNodeMetrics struct with the latest SNMP-encodable values
+    mutable std::mutex                                  m_metricsMutex;
+    std::unordered_map<std::string, SnmpNodeMetrics>   m_metricsCache;
 
     // Monotonic node index: nodeId → 1-based integer (MIB table row number)
     // Assigned in insertion order; stable for the life of the process.
