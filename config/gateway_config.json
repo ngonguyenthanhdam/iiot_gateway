@@ -4,7 +4,7 @@
 
   "mqtt": {
     "_comment": "Mosquitto broker runs locally on the Raspberry Pi 4",
-    "host": "localhost",
+    "host": "127.0.0.1",
     "port": 1883,
     "topic_data":  "factory/sensors/+/data",
     "topic_alert": "factory/sensors/+/alert",
