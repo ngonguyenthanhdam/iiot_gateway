@@ -57,58 +57,75 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_database():
-    """Initialize ALL required database tables for real MQTT data"""
+    """Initialize database with FULL schema + safe migration for existing DB"""
     with get_db_connection() as conn:
         # 1. Devices table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS devices (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_id TEXT NOT NULL UNIQUE,
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id     TEXT    NOT NULL UNIQUE,
                 sensor_type TEXT,
-                location TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                location    TEXT,
+                created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
-        # 2. Sensor logs table
+        # 2. Sensor logs table - FULL schema
         conn.execute('''
             CREATE TABLE IF NOT EXISTS sensor_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                device_id INTEGER NOT NULL,
-                temp REAL,
-                humi REAL,
-                gas INTEGER,
-                light_level INTEGER,
-                buzzer_active BOOLEAN,
-                is_muted BOOLEAN,
-                status TEXT,
-                msg_id INTEGER,
-                timestamp INTEGER,
-                received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id     INTEGER NOT NULL,
+                temp          REAL,
+                humi          REAL,
+                gas           INTEGER,
+                light_level   INTEGER,
+                buzzer_active INTEGER,
+                is_muted      INTEGER,
+                status        TEXT,
+                msg_id        INTEGER,
+                timestamp     INTEGER,
+                received_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(device_id) REFERENCES devices(id)
             )
         ''')
 
-        # 3. Thresholds table 
+        # 3. Thresholds table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS thresholds (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_id TEXT NOT NULL UNIQUE,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id       TEXT NOT NULL UNIQUE,
                 gas_threshold INTEGER NOT NULL DEFAULT 100,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
         # 4. System events table
         conn.execute('''
             CREATE TABLE IF NOT EXISTS system_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp INTEGER,
-                severity TEXT,
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   INTEGER,
+                severity    TEXT,
                 description TEXT
             )
         ''')
+
+        # ==================== MIGRATION: Add missing columns safely ====================
+        # Add columns that may be missing from old database
+        columns_to_add = [
+            ('sensor_logs', 'light_level',   'INTEGER'),
+            ('sensor_logs', 'buzzer_active', 'INTEGER'),
+            ('sensor_logs', 'is_muted',      'INTEGER'),
+            ('sensor_logs', 'gas',           'INTEGER')
+        ]
+
+        for table, col, col_type in columns_to_add:
+            # Check if column already exists
+            cursor = conn.execute(f"PRAGMA table_info({table})")
+            existing_cols = [row[1] for row in cursor.fetchall()]
+            if col not in existing_cols:
+                print(f"🔄 Adding missing column: {table}.{col}")
+                conn.execute(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}')
 
         # Insert default devices
         default_devices = [
@@ -130,7 +147,7 @@ def init_database():
             ''', (node_id,))
 
         conn.commit()
-        print("✅ Database initialized successfully (all tables created)")
+        print("✅ Database initialized successfully with migration!")
 
 
 def get_threshold(node_id: str) -> int:
