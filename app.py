@@ -1,0 +1,420 @@
+"""
+Secure IIoT Gateway Dashboard - Flask Backend
+Handles session management, routing, and API endpoints with real database integration.
+Default: User Mode (is_admin = False) until admin login.
+"""
+
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import bcrypt
+import sqlite3
+import os
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
+
+app = Flask(__name__)
+
+# Security configuration
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production-12345')
+
+# Session configuration
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
+app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+# Rate limiting
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+
+# Templates folder configuration
+base_dir = os.path.dirname(os.path.abspath(__file__))
+app.template_folder = os.path.join(base_dir, 'templates')
+
+# Database configuration
+DB_PATH = os.path.join(base_dir, 'db', 'factory_data.db')
+
+# Node ID mapping
+NODE_ID_MAPPING = {
+    'ESP32_SEC_01': 'node_01',
+    'ESP8266_SEC_02': 'node_02',
+    'ESP8266_SEC_03': 'node_03'
+}
+
+# Admin credentials (in production, store hashed in database)
+ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt())
+
+
+def get_db_connection() -> sqlite3.Connection:
+    """Get database connection with row factory"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_database():
+    """Initialize database tables if they don't exist"""
+    with get_db_connection() as conn:
+        # Create thresholds table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS thresholds (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id TEXT NOT NULL UNIQUE,
+                gas_threshold INTEGER NOT NULL DEFAULT 100,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # Insert default thresholds if not exist
+        for node_id in ['node_02', 'node_03']:
+            conn.execute('''
+                INSERT OR IGNORE INTO thresholds (node_id, gas_threshold)
+                VALUES (?, 100)
+            ''', (node_id,))
+
+        conn.commit()
+
+
+def get_threshold(node_id: str) -> int:
+    """Get gas threshold for a node"""
+    with get_db_connection() as conn:
+        row = conn.execute(
+            'SELECT gas_threshold FROM thresholds WHERE node_id = ?',
+            (node_id,)
+        ).fetchone()
+        return row['gas_threshold'] if row else 100
+
+
+def update_threshold(node_id: str, threshold: int):
+    """Update gas threshold for a node"""
+    with get_db_connection() as conn:
+        conn.execute('''
+            UPDATE thresholds
+            SET gas_threshold = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE node_id = ?
+        ''', (threshold, node_id))
+        conn.commit()
+
+
+def get_latest_sensor_data() -> Dict[str, Any]:
+    """Get latest sensor data for all nodes from database"""
+    with get_db_connection() as conn:
+        # Get latest reading for each device
+        query = '''
+            SELECT sl.device_id, d.node_id, d.sensor_type,
+                   sl.temp, sl.humi, sl.gas, sl.light_level,
+                   sl.buzzer_active, sl.is_muted,
+                   sl.status, sl.msg_id, sl.timestamp
+            FROM sensor_logs sl
+            INNER JOIN devices d ON sl.device_id = d.id
+            WHERE sl.id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY timestamp DESC) AS rn
+                    FROM sensor_logs
+                ) WHERE rn = 1
+            )
+            ORDER BY d.node_id
+        '''
+
+        readings = conn.execute(query).fetchall()
+
+        # Map to node format
+        node_data = {}
+        for reading in readings:
+            node_key = NODE_ID_MAPPING.get(reading['node_id'], reading['node_id'])
+
+            data = {
+                'temperature': reading['temp'],
+                'humidity': reading['humi'],
+                'gas': reading['gas'],
+                'light_level': reading['light_level'],
+                'buzzer_active': bool(reading['buzzer_active']) if reading['buzzer_active'] is not None else None,
+                'is_muted': bool(reading['is_muted']) if reading['is_muted'] is not None else None,
+                'msg_id': reading['msg_id'],
+                'status': reading['status'],
+                'timestamp': reading['timestamp']
+            }
+
+            # Remove None values for cleaner JSON
+            data = {k: v for k, v in data.items() if v is not None}
+            node_data[node_key] = data
+
+        # Ensure all nodes have entries (even if no data)
+        for mapped_id in ['node_01', 'node_02', 'node_03']:
+            if mapped_id not in node_data:
+                node_data[mapped_id] = {}
+
+        # Add thresholds
+        node_data['thresholds'] = {
+            'node_02_gas_threshold': get_threshold('node_02'),
+            'node_03_gas_threshold': get_threshold('node_03')
+        }
+
+        return node_data
+
+
+@app.before_request
+def before_request():
+    """Set session to permanent before each request"""
+    session.permanent = True
+
+
+# ==================== MAIN ROUTES ====================
+
+@app.route('/')
+def index():
+    """Redirect root to dashboard"""
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/dashboard')
+def dashboard():
+    """
+    Main dashboard route - renders dashboard as Jinja2 template.
+    Default: is_admin = False (User mode)
+    """
+    is_admin = session.get('is_admin', False)
+    return render_template('index.html', is_admin=is_admin)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def login():
+    """
+    Admin login route with rate limiting and bcrypt password validation.
+    """
+    error = None
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+
+        # Validate password using bcrypt
+        if bcrypt.checkpw(password.encode('utf-8'), ADMIN_PASSWORD_HASH):
+            session['is_admin'] = True
+            return redirect(url_for('dashboard'))
+        else:
+            error = 'Invalid password'
+
+    return render_template('login.html', error=error)
+
+
+@app.route('/logout')
+def logout():
+    """Clear session and redirect to dashboard (User mode)"""
+    session.clear()
+    return redirect(url_for('dashboard'))
+
+
+# ==================== API ENDPOINTS ====================
+
+@app.route('/api/node_data')
+def node_data():
+    """
+    Fetch current sensor data for all three nodes from database.
+    Returns: node_01, node_02, node_03 data + thresholds
+    """
+    try:
+        return jsonify(get_latest_sensor_data())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/events')
+def events():
+    """
+    Fetch security and system events log from database.
+    Returns: list of event objects with timestamp and description
+    """
+    try:
+        with get_db_connection() as conn:
+            events_data = conn.execute('''
+                SELECT timestamp, severity, description
+                FROM system_events
+                ORDER BY timestamp DESC
+                LIMIT 50
+            ''').fetchall()
+
+            events_list = []
+            for event in events_data:
+                events_list.append({
+                    'timestamp': datetime.fromtimestamp(event['timestamp']).strftime('%H:%M:%S'),
+                    'description': event['description'],
+                    'type': event['severity'].lower()
+                })
+
+            # If no events in DB, return some default ones
+            if not events_list:
+                events_list = [
+                    {
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
+                        'description': 'System started and dashboard initialized',
+                        'type': 'startup'
+                    }
+                ]
+
+            return jsonify(events_list)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/update_threshold', methods=['POST'])
+def update_threshold_api():
+    """
+    Update gas threshold for a node (Admin only).
+    Requires: is_admin = True
+    Request body: { node_id, threshold_type, value }
+    """
+    # Check admin authorization
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
+
+    try:
+        data = request.get_json()
+        node_id = data.get('node_id')
+        threshold_type = data.get('threshold_type')
+        value = data.get('value')
+
+        # Validate input
+        if not node_id or not threshold_type or value is None:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        try:
+            value = int(value)
+            if value < 0 or value > 10000:
+                return jsonify({'error': 'Threshold must be between 0 and 10000'}), 400
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid threshold value'}), 400
+
+        # Validate node and threshold type
+        if node_id not in ['node_02', 'node_03'] or threshold_type != 'gas':
+            return jsonify({'error': 'Unknown node or threshold type'}), 400
+
+        # Update in database
+        update_threshold(node_id, value)
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Threshold for {node_id} updated to {value} ppm'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/simulation', methods=['POST'])
+def simulation():
+    """
+    Trigger simulation events (Admin only).
+    Simulates: replay attacks, node disconnections, sensor errors.
+    Requires: is_admin = True
+    Request body: { type, state }
+    """
+    # Check admin authorization
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
+
+    try:
+        data = request.get_json()
+        sim_type = data.get('type')
+        sim_state = data.get('state')
+
+        if not sim_type or not sim_state:
+            return jsonify({'error': 'Missing type or state'}), 400
+
+        # Map simulation types
+        simulation_map = {
+            'replay_attack': ['start', 'stop'],
+            'disconnection': ['trigger', 'restore'],
+            'sensor_error': ['inject', 'clear']
+        }
+
+        if sim_type not in simulation_map or sim_state not in simulation_map[sim_type]:
+            return jsonify({'error': f'Invalid simulation type or state'}), 400
+
+        # Log simulation (in production, trigger actual backend events)
+        print(f"[SIMULATION] {sim_type.upper()}: {sim_state}")
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Simulation {sim_type} {sim_state} triggered'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """
+    AI Q&A endpoint (Gemini Pro integration).
+    Request body: { question }
+    Returns: { answer }
+    """
+    try:
+        data = request.get_json()
+        question = data.get('question', '')
+
+        if not question:
+            return jsonify({'error': 'No question provided'}), 400
+
+        # Mock response (replace with actual Gemini API call in production)
+        mock_responses = {
+            'threshold': 'Gas thresholds can be adjusted in the Node tabs. Safe levels are typically 0-100 ppm.',
+            'sensor': 'The system monitors three sensor nodes: Node_01 (ESP32) with temp/humidity/light, and Node_02/Node_03 (ESP8266) with temp/humidity/gas sensors.',
+            'security': 'The dashboard includes RBAC controls, simulation modes for testing security, and real-time event logging.',
+            'temperature': 'Normal operating temperature range is 15-30°C. Current readings are within safe parameters.',
+            'gas': 'Gas concentration is measured in parts per million (ppm). Alert threshold can be customized per node.',
+            'default': f'You asked: "{question}" - In production, this would be answered by Gemini Pro. Features: node monitoring, threshold management, security simulation, event logging.'
+        }
+
+        # Simple keyword matching for demo
+        question_lower = question.lower()
+        answer = mock_responses['default']
+
+        for keyword, response in mock_responses.items():
+            if keyword in question_lower:
+                answer = response
+                break
+
+        return jsonify({'answer': answer})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ==================== ERROR HANDLERS ====================
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    return jsonify({'error': 'Endpoint not found'}), 404
+
+
+@app.errorhandler(500)
+def server_error(error):
+    """Handle 500 errors"""
+    return jsonify({'error': 'Internal server error'}), 500
+
+
+# ==================== MAIN ====================
+
+if __name__ == '__main__':
+    # Initialize database
+    init_database()
+
+    print("=" * 60)
+    print("Secure IIoT Gateway Dashboard - Flask Server")
+    print("=" * 60)
+    print("\n📊 Dashboard: http://localhost:5000/dashboard")
+    print("🔐 Admin Login: http://localhost:5000/login")
+    print("   Default password: admin123")
+    print("\n⚙️  Default mode: USER (read-only)")
+    print("🔓 Admin mode: Available after login\n")
+
+    app.run(debug=True, host='localhost', port=5000)

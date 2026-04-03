@@ -76,13 +76,15 @@ enum class SensorType : uint8_t {
 //   5. Compared with previous reading in DataProcessor for anomaly detection
 //
 // Design notes:
-//   • temperature / humidity / gasValue are std::optional<T> — only nodes whose
+//   • temperature / humidity / gasValue / lightLevel / buzzerActive / isMuted are std::optional<T> — only nodes whose
 //     hardware carries that sensor populate the field. Attempting to read an
 //     unpopulated optional throws std::bad_optional_access, making absent-field
 //     access a hard error rather than a silent default.
 //   • gasValue is int32_t (not float): the ESP8266 ADC is 10-bit (0–1023) and
 //     the value is stored raw. int32_t accommodates sentinel values such as -1
 //     (sensor preheat not yet complete) without ambiguity with valid ADC readings.
+//   • lightLevel is int32_t: ESP32 ADC is 12-bit (0–4095).
+//   • buzzerActive and isMuted are bool: directly from ESP32 payload.
 //   • msgId is uint32_t — matches the ESP SecurityUtils counter width (2^32).
 //   • timestamp is int64_t — Unix epoch seconds; avoids the year-2038 issue.
 // ------------------------------------------------------------------------------
@@ -94,6 +96,10 @@ struct SensorReading {
     std::optional<int32_t>   gasValue;    ///< ADC   — present only for ENV_MONITOR_GAS
                                           ///<          nodes (ESP8266 MQ sensor, 0–1023).
                                           ///<          -1 indicates sensor still preheating.
+    std::optional<int32_t>   lightLevel;  ///< ADC   — present only for ENV_MONITOR
+                                          ///<          nodes (ESP32 light sensor, 0–4095).
+    std::optional<bool>      buzzerActive;///< true if buzzer is sounding — ESP32 only
+    std::optional<bool>      isMuted;     ///< true if mute button pressed — ESP32 only
     DeviceStatus             status;      ///< Operational status
     uint32_t                 msgId;       ///< Monotonically increasing message counter
     int64_t                  timestamp;   ///< Unix epoch (seconds) from device payload
@@ -111,6 +117,9 @@ struct SensorReading {
         , temperature(std::nullopt)
         , humidity(std::nullopt)
         , gasValue(std::nullopt)
+        , lightLevel(std::nullopt)
+        , buzzerActive(std::nullopt)
+        , isMuted(std::nullopt)
         , status(DeviceStatus::UNKNOWN)
         , msgId(0)
         , timestamp(0)

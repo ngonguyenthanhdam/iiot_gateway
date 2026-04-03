@@ -204,13 +204,12 @@ void DatabaseManager::initSchema() {
     // ------------------------------------------------------------------
     // Table 2: sensor_logs — time-series sensor readings
     //
-    // New column (v1.1.0):
-    //   gas  INTEGER — raw 10-bit ADC value from ESP8266 A0 pin (0–1023).
-    //                  NULL when the node does not carry a gas sensor or
-    //                  when the MQ sensor is still in its preheat phase
-    //                  (device sends -1 during preheat; gateway stores NULL).
-    //                  INTEGER not REAL: ADC values are whole numbers and
-    //                  integer comparisons against thresholds are exact.
+    // New columns (v1.2.0):
+    //   gas         INTEGER — raw 10-bit ADC value from ESP8266 A0 pin (0–1023).
+    //   light_level INTEGER — raw 12-bit ADC value from ESP32 light sensor (0–4095).
+    //   buzzer_active INTEGER — 1 if buzzer is active, 0 otherwise (ESP32 only).
+    //   is_muted     INTEGER — 1 if mute button pressed, 0 otherwise (ESP32 only).
+    //                  All new columns are NULLABLE for backward compatibility.
     // ------------------------------------------------------------------
     execSQL(R"SQL(
         CREATE TABLE IF NOT EXISTS sensor_logs (
@@ -219,6 +218,9 @@ void DatabaseManager::initSchema() {
             temp        REAL,               -- NULL when sensor not present
             humi        REAL,               -- NULL when sensor not present
             gas         INTEGER,            -- NULL when no gas sensor / preheating
+            light_level INTEGER,            -- NULL when no light sensor
+            buzzer_active INTEGER,          -- NULL when no buzzer control
+            is_muted    INTEGER,            -- NULL when no mute button
             status      TEXT    NOT NULL,
             msg_id      INTEGER NOT NULL,
             timestamp   INTEGER NOT NULL,   -- Unix epoch seconds (from device)
@@ -252,6 +254,55 @@ void DatabaseManager::initSchema() {
         CREATE INDEX IF NOT EXISTS idx_system_events_ts
         ON system_events (timestamp DESC);
     )SQL");
+
+    // Migrate existing databases to add new columns (safe ALTER TABLE)
+    migrateSensorLogsTable();
+}
+
+// -----------------------------------------------------------------------------
+// migrateSensorLogsTable
+//
+// Safely adds new columns to sensor_logs for backward compatibility.
+// Uses ALTER TABLE ADD COLUMN IF NOT EXISTS (SQLite 3.37.0+), but since older
+// versions don't support IF NOT EXISTS for ADD COLUMN, we check column existence
+// manually to avoid errors on re-run.
+//
+// This function is called from initSchema() after table creation.
+// -----------------------------------------------------------------------------
+void DatabaseManager::migrateSensorLogsTable() {
+    // Check if columns already exist to avoid ALTER TABLE errors
+    auto columnExists = [this](const string& colName) -> bool {
+        const char* sql = "PRAGMA table_info(sensor_logs);";
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) return false;
+
+        bool exists = false;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            if (name == colName) {
+                exists = true;
+                break;
+            }
+        }
+        sqlite3_finalize(stmt);
+        return exists;
+    };
+
+    // Add light_level column if not exists
+    if (!columnExists("light_level")) {
+        execSQL("ALTER TABLE sensor_logs ADD COLUMN light_level INTEGER;");
+    }
+
+    // Add buzzer_active column if not exists
+    if (!columnExists("buzzer_active")) {
+        execSQL("ALTER TABLE sensor_logs ADD COLUMN buzzer_active INTEGER;");
+    }
+
+    // Add is_muted column if not exists
+    if (!columnExists("is_muted")) {
+        execSQL("ALTER TABLE sensor_logs ADD COLUMN is_muted INTEGER;");
+    }
 }
 
 // =============================================================================
@@ -370,12 +421,12 @@ bool DatabaseManager::insertSensorLog(const SensorReading& reading) {
 
     lock_guard<mutex> lock(m_mutex);
 
-    // gas column added at position 4; status, msg_id, timestamp shift to 5/6/7.
+    // New columns: light_level (5), buzzer_active (6), is_muted (7); status shifts to 8, etc.
     const char* sql = R"SQL(
         INSERT INTO sensor_logs
-            (device_id, temp, humi, gas, status, msg_id, timestamp)
+            (device_id, temp, humi, gas, light_level, buzzer_active, is_muted, status, msg_id, timestamp)
         VALUES
-            (?, ?, ?, ?, ?, ?, ?);
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     )SQL";
 
     sqlite3_stmt* stmt = nullptr;
@@ -411,13 +462,34 @@ bool DatabaseManager::insertSensorLog(const SensorReading& reading) {
         sqlite3_bind_null(stmt, 4);
     }
 
-    // Status string (param 5)
-    string statusStr = deviceStatusToString(reading.status);
-    sqlite3_bind_text(stmt, 5, statusStr.c_str(), -1, SQLITE_TRANSIENT);
+    // Light level — NULL when no light sensor (ESP32 only)
+    if (reading.lightLevel.has_value()) {
+        sqlite3_bind_int(stmt, 5, static_cast<int>(*reading.lightLevel));
+    } else {
+        sqlite3_bind_null(stmt, 5);
+    }
 
-    // msg_id (param 6) and device timestamp (param 7)
-    sqlite3_bind_int64(stmt, 6, static_cast<int64_t>(reading.msgId));
-    sqlite3_bind_int64(stmt, 7, reading.timestamp);
+    // Buzzer active — NULL when no buzzer control (ESP32 only)
+    if (reading.buzzerActive.has_value()) {
+        sqlite3_bind_int(stmt, 6, *reading.buzzerActive ? 1 : 0);
+    } else {
+        sqlite3_bind_null(stmt, 6);
+    }
+
+    // Is muted — NULL when no mute button (ESP32 only)
+    if (reading.isMuted.has_value()) {
+        sqlite3_bind_int(stmt, 7, *reading.isMuted ? 1 : 0);
+    } else {
+        sqlite3_bind_null(stmt, 7);
+    }
+
+    // Status string (param 8)
+    string statusStr = deviceStatusToString(reading.status);
+    sqlite3_bind_text(stmt, 8, statusStr.c_str(), -1, SQLITE_TRANSIENT);
+
+    // msg_id (param 9) and device timestamp (param 10)
+    sqlite3_bind_int64(stmt, 9, static_cast<int64_t>(reading.msgId));
+    sqlite3_bind_int64(stmt, 10, reading.timestamp);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -729,6 +801,116 @@ int64_t DatabaseManager::purgeOldLogs(int retentionDays) {
               << " [DB] Purged " << deleted
               << " sensor_log rows older than " << retentionDays << " days.\n";
     return deleted;
+}
+
+// -----------------------------------------------------------------------------
+// getLatestDataForAllNodes
+//
+// Retrieves the most recent SensorReading for every known node.
+// Uses a window function (ROW_NUMBER() OVER) to get the latest row per node_id,
+// then filters to only the top-ranked row per group.
+//
+// Alternative query without window functions (slower on large tables):
+//   SELECT sl.* FROM sensor_logs sl
+//   INNER JOIN (SELECT device_id, MAX(timestamp) AS max_ts
+//               FROM sensor_logs GROUP BY device_id) latest
+//   ON sl.device_id = latest.device_id AND sl.timestamp = latest.max_ts;
+//
+// Returns: vector<SensorReading> with one entry per node that has ever logged data.
+// -----------------------------------------------------------------------------
+std::vector<SensorReading> DatabaseManager::getLatestDataForAllNodes() {
+    lock_guard<mutex> lock(m_mutex);
+
+    const char* sql = R"SQL(
+        SELECT sl.device_id, d.node_id, d.sensor_type,
+               sl.temp, sl.humi, sl.gas, sl.light_level, sl.buzzer_active, sl.is_muted,
+               sl.status, sl.msg_id, sl.timestamp, sl.captured_at
+        FROM sensor_logs sl
+        INNER JOIN devices d ON sl.device_id = d.id
+        WHERE sl.id IN (
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY timestamp DESC) AS rn
+                FROM sensor_logs
+            ) WHERE rn = 1
+        )
+        ORDER BY d.node_id;
+    )SQL";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) {
+        logSqliteError("getLatestDataForAllNodes(prepare)", rc);
+        return {};
+    }
+
+    std::vector<SensorReading> readings;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        SensorReading reading;
+
+        // device_id (0) — not stored in SensorReading
+        // node_id (1)
+        reading.nodeId = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+
+        // sensor_type (2) — parse from string
+        string sensorTypeStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        reading.sensorType = sensorTypeFromString(sensorTypeStr);
+
+        // temp (3) — REAL, may be NULL
+        if (sqlite3_column_type(stmt, 3) != SQLITE_NULL) {
+            reading.temperature = static_cast<float>(sqlite3_column_double(stmt, 3));
+        }
+
+        // humi (4) — REAL, may be NULL
+        if (sqlite3_column_type(stmt, 4) != SQLITE_NULL) {
+            reading.humidity = static_cast<float>(sqlite3_column_double(stmt, 4));
+        }
+
+        // gas (5) — INTEGER, may be NULL
+        if (sqlite3_column_type(stmt, 5) != SQLITE_NULL) {
+            reading.gasValue = static_cast<int32_t>(sqlite3_column_int(stmt, 5));
+        }
+
+        // light_level (6) — INTEGER, may be NULL
+        if (sqlite3_column_type(stmt, 6) != SQLITE_NULL) {
+            reading.lightLevel = static_cast<int32_t>(sqlite3_column_int(stmt, 6));
+        }
+
+        // buzzer_active (7) — INTEGER, may be NULL
+        if (sqlite3_column_type(stmt, 7) != SQLITE_NULL) {
+            reading.buzzerActive = (sqlite3_column_int(stmt, 7) != 0);
+        }
+
+        // is_muted (8) — INTEGER, may be NULL
+        if (sqlite3_column_type(stmt, 8) != SQLITE_NULL) {
+            reading.isMuted = (sqlite3_column_int(stmt, 8) != 0);
+        }
+
+        // status (9) — TEXT
+        string statusStr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9));
+        reading.status = deviceStatusFromString(statusStr);
+
+        // msg_id (10) — INTEGER
+        reading.msgId = static_cast<uint32_t>(sqlite3_column_int64(stmt, 10));
+
+        // timestamp (11) — INTEGER (device epoch)
+        reading.timestamp = sqlite3_column_int64(stmt, 11);
+
+        // captured_at (12) — not stored in SensorReading (gateway timestamp)
+
+        // receivedAt — set to 0 (not available from DB)
+        reading.receivedAt = 0;
+
+        readings.push_back(std::move(reading));
+    }
+
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        logSqliteError("getLatestDataForAllNodes(step)", rc);
+        return {};
+    }
+
+    return readings;
 }
 
 // =============================================================================

@@ -166,6 +166,20 @@ public:
     uint32_t getLastMsgId(const std::string& nodeId);
 
     // -------------------------------------------------------------------------
+    // getLatestDataForAllNodes
+    //
+    // Retrieves the most recent SensorReading for every known node.
+    // Queries sensor_logs with a JOIN to devices, ordered by timestamp DESC,
+    // and returns one SensorReading per node_id (the latest by device timestamp).
+    //
+    // Used by the SNMP agent for GET operations without round-tripping to the
+    // in-memory cache, and by the web dashboard for initial page load.
+    //
+    // Returns: vector of SensorReading, one per node. Empty if no data or error.
+    // -------------------------------------------------------------------------
+    std::vector<SensorReading> getLatestDataForAllNodes();
+
+    // -------------------------------------------------------------------------
     // purgeOldLogs
     //
     // Deletes sensor_logs rows older than `retentionDays` days.

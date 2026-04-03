@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login | Secure IIoT Gateway</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Roboto, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+        }
+        .login-container {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 2rem;
+            max-width: 400px;
+            width: 90%;
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .login-header h2 {
+            color: #0a2b44;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .login-header p {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .form-group label {
+            font-weight: 500;
+            color: #1e2a3e;
+            margin-bottom: 0.5rem;
+        }
+        .form-control {
+            border-radius: 0.5rem;
+            border: 1px solid #dee2e6;
+            padding: 0.75rem 1rem;
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        .btn-login {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-weight: 500;
+            width: 100%;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
+        }
+        .btn-login:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #6a3f8f 100%);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .alert-danger {
+            border-radius: 0.5rem;
+            border: none;
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 1.5rem;
+        }
+        .back-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+        .password-hint {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 0.5rem;
+            padding: 0.75rem;
+            background-color: #f8f9fa;
+            border-left: 3px solid #667eea;
+            border-radius: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <!-- Header -->
+        <div class="login-header">
+            <h2><i class="fas fa-microchip me-2"></i>Secure IIoT Gateway</h2>
+            <p>Admin Access Required</p>
+        </div>
+
+        <!-- Error Alert -->
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            <i class="fas fa-exclamation-circle me-2"></i>{{ error }}
+        </div>
+        {% endif %}
+
+        <!-- Login Form -->
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="password" class="form-label">
+                    <i class="fas fa-lock me-1"></i>Admin Password
+                </label>
+                <input type="password" class="form-control" id="password" name="password" placeholder="Enter admin password" required autofocus>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-login">
+                <i class="fas fa-sign-in-alt me-2"></i>Login
+            </button>
+        </form>
+
+        <!-- Password Hint -->
+        <div class="password-hint">
+            <strong>Demo password:</strong> <code>admin123</code>
+            <br><small style="display: block; margin-top: 0.5rem;">⚠️ For production, implement proper OAuth2/LDAP authentication.</small>
+        </div>
+
+        <!-- Back Link -->
+        <div class="back-link">
+            <a href="{{ url_for('dashboard') }}"><i class="fas fa-arrow-left me-1"></i>Back to Dashboard</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

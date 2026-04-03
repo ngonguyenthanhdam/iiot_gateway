@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Secure IIoT Gateway | Raspberry Pi 4</title>
+    <!-- Bootstrap 5 + Corporate Light (white, cyan, light gray) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js 3 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Font Awesome Icons (optional but nice) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Custom CSS - Corporate Light style: white, cyan, light gray */
+        body {
+            background-color: #f0f4f8;
+            font-family: 'Segoe UI', Roboto, system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+        }
+        .navbar-brand {
+            font-weight: 600;
+            color: #0d6efd !important;
+        }
+        .card {
+            border-radius: 1rem;
+            border: none;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.03), 0 2px 4px rgba(0,0,0,0.05);
+            background: white;
+            transition: 0.2s;
+        }
+        .card-header {
+            background-color: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            font-weight: 600;
+            color: #1e2a3e;
+            border-radius: 1rem 1rem 0 0 !important;
+        }
+        .nav-tabs .nav-link {
+            color: #2c3e50;
+            font-weight: 500;
+            border: none;
+            border-bottom: 3px solid transparent;
+            margin-right: 0.5rem;
+            transition: all 0.2s;
+        }
+        .nav-tabs .nav-link.active {
+            color: #0d6efd;
+            background: transparent;
+            border-bottom: 3px solid #0d6efd;
+        }
+        .nav-tabs .nav-link:hover:not(.active) {
+            border-bottom: 3px solid #9bc5ff;
+            color: #0b5ed7;
+        }
+        /* Gas indicator flashing red when threshold exceeded */
+        .gas-flashing {
+            animation: gasAlertFlash 0.9s step-end infinite;
+            background-color: #ffdddd;
+            font-weight: bold;
+            border-radius: 12px;
+            padding: 0.3rem 0.6rem;
+            display: inline-block;
+            transition: all 0.1s;
+            color: #a00;
+        }
+        @keyframes gasAlertFlash {
+            0% { background-color: #ffb3b3; color: #b91c1c; border-left: 3px solid red; }
+            50% { background-color: #ff6b6b; color: white; border-left: 3px solid #8b0000; }
+            100% { background-color: #ffb3b3; color: #b91c1c; border-left: 3px solid red; }
+        }
+        .threshold-badge {
+            background: #e9ecef;
+            border-radius: 20px;
+            padding: 4px 10px;
+            font-size: 0.75rem;
+        }
+        .event-log {
+            max-height: 280px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+        }
+        .chat-container {
+            height: 450px;
+            display: flex;
+            flex-direction: column;
+            background: #ffffff;
+            border-radius: 1rem;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            background: #f9fbfd;
+        }
+        .chat-bubble-user {
+            background: #0d6efd;
+            color: white;
+            border-radius: 20px 20px 5px 20px;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.8rem;
+            max-width: 80%;
+            margin-left: auto;
+            width: fit-content;
+        }
+        .chat-bubble-bot {
+            background: #e9ecef;
+            color: #1e2a3e;
+            border-radius: 20px 20px 20px 5px;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.8rem;
+            max-width: 85%;
+            width: fit-content;
+        }
+        .btn-soft {
+            border-radius: 40px;
+            padding: 0.4rem 1rem;
+        }
+        .sim-card {
+            background: #f9fbfd;
+            transition: 0.1s;
+        }
+        footer {
+            font-size: 0.75rem;
+            color: #5a6e7c;
+        }
+        .update-threshold-group input {
+            max-width: 100px;
+        }
+        .node-value {
+            font-weight: 700;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container my-4">
+    <!-- Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-semibold" style="color:#0a2b44;"><i class="fas fa-microchip me-2 text-info"></i>Secure IIoT Gateway</h2>
+            <p class="text-muted">Raspberry Pi 4 | Real-time IIoT Monitoring</p>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <div class="badge bg-light text-dark p-3 shadow-sm">
+                <i class="fas fa-shield-alt text-success me-1"></i> 
+                {% if is_admin %} Admin Mode <i class="fas fa-user-shield ms-1"></i> {% else %} User Mode (Read-only) {% endif %}
+            </div>
+            <div>
+                {% if is_admin %}
+                <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm"><i class="fas fa-sign-out-alt me-1"></i>Logout</a>
+                {% else %}
+                <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-sm"><i class="fas fa-sign-in-alt me-1"></i>Admin Login</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Tabs navigation (Jinja2 RBAC: Simulation tab only for admin) -->
+    <ul class="nav nav-tabs mb-4" id="iotTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="overview-tab" data-bs-toggle="tab" data-bs-target="#overview" type="button" role="tab"><i class="fas fa-tachometer-alt me-1"></i>Overview</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="node1-tab" data-bs-toggle="tab" data-bs-target="#node1" type="button" role="tab"><i class="fas fa-microchip me-1"></i>Node_01 (ESP32)</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="node2-tab" data-bs-toggle="tab" data-bs-target="#node2" type="button" role="tab"><i class="fas fa-wifi me-1"></i>Node_02 (ESP8266)</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="node3-tab" data-bs-toggle="tab" data-bs-target="#node3" type="button" role="tab"><i class="fas fa-wifi me-1"></i>Node_03 (ESP8266)</button>
+        </li>
+        {% if is_admin %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="simulation-tab" data-bs-toggle="tab" data-bs-target="#simulation" type="button" role="tab"><i class="fas fa-bug me-1"></i>Simulation & Security</button>
+        </li>
+        {% endif %}
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab"><i class="fas fa-robot me-1"></i>AI Q&A</button>
+        </li>
+    </ul>
+
+    <!-- Tab panes content -->
+    <div class="tab-content">
+        <!-- OVERVIEW PANE -->
+        <div class="tab-pane fade show active" id="overview" role="tabpanel">
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-white"><i class="fas fa-chart-line text-info me-2"></i>ESP32 Node</div>
+                        <div class="card-body">
+                            <p><strong>🌡️ Temp:</strong> <span id="ov_temp01">--</span> °C</p>
+                            <p><strong>💧 Humidity:</strong> <span id="ov_hum01">--</span> %</p>
+                            <p><strong>☀️ Light:</strong> <span id="ov_light01">--</span> lux</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-white"><i class="fas fa-chart-line text-info me-2"></i>ESP8266 #02</div>
+                        <div class="card-body">
+                            <p><strong>🌡️ Temp:</strong> <span id="ov_temp02">--</span> °C</p>
+                            <p><strong>💧 Humidity:</strong> <span id="ov_hum02">--</span> %</p>
+                            <p><strong>⚠️ Gas:</strong> <span id="ov_gas02">--</span> ppm</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-white"><i class="fas fa-chart-line text-info me-2"></i>ESP8266 #03</div>
+                        <div class="card-body">
+                            <p><strong>🌡️ Temp:</strong> <span id="ov_temp03">--</span> °C</p>
+                            <p><strong>💧 Humidity:</strong> <span id="ov_hum03">--</span> %</p>
+                            <p><strong>⚠️ Gas:</strong> <span id="ov_gas03">--</span> ppm</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header bg-white"><i class="fas fa-bell me-2"></i>Security & System Events</div>
+                        <div class="card-body">
+                            <div id="eventsList" class="event-log">
+                                <div class="text-muted">Loading events ...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NODE 01 (ESP32) - Chart: temp + humidity + light -->
+        <div class="tab-pane fade" id="node1" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-white"><i class="fas fa-chart-line me-2 text-cyan"></i>Node_01 (ESP32) - Real-time Sensor Trends</div>
+                <div class="card-body">
+                    <canvas id="node01Chart" width="400" height="200" style="max-height: 400px; width:100%"></canvas>
+                    <hr>
+                    <div class="row mt-3 text-center">
+                        <div class="col"><span class="badge bg-secondary">🌡️ Temperature</span> <span id="node01_temp_val" class="fw-bold ms-2">--</span> °C</div>
+                        <div class="col"><span class="badge bg-secondary">💧 Humidity</span> <span id="node01_hum_val" class="fw-bold ms-2">--</span> %</div>
+                        <div class="col"><span class="badge bg-secondary">☀️ Light Intensity</span> <span id="node01_light_val" class="fw-bold ms-2">--</span> lux</div>
+                        <div class="col"><span class="badge bg-secondary">🔊 Buzzer</span> <span id="node01_buzzer_val" class="fw-bold ms-2">--</span></div>
+                        <div class="col"><span class="badge bg-secondary">🔇 Muted</span> <span id="node01_muted_val" class="fw-bold ms-2">--</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NODE 02 (ESP8266) : temp, hum, gas + gas flashing + threshold update (admin only) -->
+        <div class="tab-pane fade" id="node2" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-white"><i class="fas fa-fire-extinguisher me-2"></i>Node_02 (ESP8266) - Gas Monitoring</div>
+                <div class="card-body">
+                    <canvas id="node02Chart" width="400" height="200" style="max-height: 380px; width:100%"></canvas>
+                    <div class="row mt-4 align-items-center">
+                        <div class="col-md-4"><span class="fw-bold">🌡️ Temperature:</span> <span id="node02_temp" class="node-value">--</span> °C</div>
+                        <div class="col-md-4"><span class="fw-bold">💧 Humidity:</span> <span id="node02_hum" class="node-value">--</span> %</div>
+                        <div class="col-md-4"><span class="fw-bold">⚠️ Gas concentration:</span> 
+                            <span id="node02_gas" class="node-value">--</span> ppm 
+                            <span id="gasIndicator02" class="ms-2 threshold-badge">⏺ Normal</span>
+                        </div>
+                    </div>
+                    <div class="row mt-3 align-items-center">
+                        <div class="col-md-6"><i class="fas fa-tachometer-alt"></i> Gas Threshold: <strong id="node02_threshold_display">--</strong> ppm</div>
+                        {% if is_admin %}
+                        <div class="col-md-6 update-threshold-group">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">New Gas Threshold</span>
+                                <input type="number" id="node02_threshold_input" class="form-control" placeholder="ppm" value="100" step="5">
+                                <button class="btn btn-outline-primary" id="updateThreshold02Btn">Update Threshold</button>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="col-md-6 text-muted"><i class="fas fa-lock"></i> Threshold update restricted (User mode)</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- NODE 03 (ESP8266) identical structure -->
+        <div class="tab-pane fade" id="node3" role="tabpanel">
+            <div class="card">
+                <div class="card-header bg-white"><i class="fas fa-fire-extinguisher me-2"></i>Node_03 (ESP8266) - Gas Monitoring</div>
+                <div class="card-body">
+                    <canvas id="node03Chart" width="400" height="200" style="max-height: 380px; width:100%"></canvas>
+                    <div class="row mt-4">
+                        <div class="col-md-4"><span class="fw-bold">🌡️ Temperature:</span> <span id="node03_temp" class="node-value">--</span> °C</div>
+                        <div class="col-md-4"><span class="fw-bold">💧 Humidity:</span> <span id="node03_hum" class="node-value">--</span> %</div>
+                        <div class="col-md-4"><span class="fw-bold">⚠️ Gas concentration:</span> 
+                            <span id="node03_gas" class="node-value">--</span> ppm 
+                            <span id="gasIndicator03" class="ms-2 threshold-badge">⏺ Normal</span>
+                        </div>
+                    </div>
+                    <div class="row mt-3">
+                        <div class="col-md-6"><i class="fas fa-tachometer-alt"></i> Gas Threshold: <strong id="node03_threshold_display">--</strong> ppm</div>
+                        {% if is_admin %}
+                        <div class="col-md-6 update-threshold-group">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text">New Gas Threshold</span>
+                                <input type="number" id="node03_threshold_input" class="form-control" placeholder="ppm" value="100" step="5">
+                                <button class="btn btn-outline-primary" id="updateThreshold03Btn">Update Threshold</button>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="col-md-6 text-muted"><i class="fas fa-lock"></i> Threshold update restricted</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIMULATION TAB (Admin only) -->
+        {% if is_admin %}
+        <div class="tab-pane fade" id="simulation" role="tabpanel">
+            <div class="row g-4">
+                <div class="col-md-4">
+                    <div class="card sim-card text-center">
+                        <div class="card-body">
+                            <i class="fas fa-repeat fa-2x text-warning mb-2"></i>
+                            <h5>Replay Attack</h5>
+                            <p class="small">Simulate malicious replay of telemetry</p>
+                            <button class="btn btn-outline-danger" id="simReplayBtn"><i class="fas fa-play"></i> Trigger Attack</button>
+                            <button class="btn btn-outline-secondary mt-2" id="simReplayStopBtn">Reset</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card sim-card text-center">
+                        <div class="card-body">
+                            <i class="fas fa-plug fa-2x text-danger mb-2"></i>
+                            <h5>Disconnection (Watchdog)</h5>
+                            <p class="small">Simulate node disconnection event</p>
+                            <button class="btn btn-outline-danger" id="simDisconnectBtn">Trigger Disconnect</button>
+                            <button class="btn btn-outline-secondary mt-2" id="simDisconnectStopBtn">Restore</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card sim-card text-center">
+                        <div class="card-body">
+                            <i class="fas fa-exclamation-triangle fa-2x text-warning mb-2"></i>
+                            <h5>Sensor Error</h5>
+                            <p class="small">Inject random sensor fault</p>
+                            <button class="btn btn-outline-danger" id="simSensorErrorBtn">Inject Error</button>
+                            <button class="btn btn-outline-secondary mt-2" id="simSensorClearBtn">Clear Error</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 text-muted mt-2"><i class="fas fa-info-circle"></i> Simulation events appear in Security Events log (Overview tab).</div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- AI Q&A Chatbot (Gemini Pro via backend) -->
+        <div class="tab-pane fade" id="chat" role="tabpanel">
+            <div class="card p-0">
+                <div class="chat-container">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="chat-bubble-bot">🤖 Hi! I'm the IIoT AI assistant (Gemini Pro). Ask me about sensor analytics, thresholds, or security recommendations.</div>
+                    </div>
+                    <div class="p-3 bg-light border-top">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="chatInput" placeholder="Ask something about IIoT, thresholds, or gateway...">
+                            <button class="btn btn-primary" id="sendChatBtn"><i class="fas fa-paper-plane"></i> Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="text-center mt-5 pt-2 border-top">Secure IIoT Gateway © 2026 | Real-time data polling | RBAC enabled</footer>
+</div>
+
+<script>
+    // ---------------------- GLOBALS & CHARTS --------------------------
+    let node01Chart, node02Chart, node03Chart;
+    let timeLabels = [];
+    const MAX_DATA_POINTS = 20;
+
+    // thresholds state (gas)
+    let gasThresholds = { node_02: 100, node_03: 100 };
+
+    // Helper: format time for chart labels
+    function getCurrentTimeLabel() {
+        const now = new Date();
+        return now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    }
+
+    // Initialize charts
+    function initCharts() {
+        const ctx1 = document.getElementById('node01Chart').getContext('2d');
+        node01Chart = new Chart(ctx1, {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'Temperature (°C)', borderColor: '#ff6384', backgroundColor: 'transparent', tension: 0.2, data: [] },
+                { label: 'Humidity (%)', borderColor: '#36a2eb', backgroundColor: 'transparent', tension: 0.2, data: [] },
+                { label: 'Light Intensity (lux)', borderColor: '#ffce56', backgroundColor: 'transparent', tension: 0.2, data: [] }
+            ]},
+            options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { position: 'top' } } }
+        });
+        const ctx2 = document.getElementById('node02Chart').getContext('2d');
+        node02Chart = new Chart(ctx2, {
+            type: 'line', data: { labels: [], datasets: [
+                { label: 'Temp (°C)', borderColor: '#ff9f40', data: [] },
+                { label: 'Humidity (%)', borderColor: '#4bc0c0', data: [] },
+                { label: 'Gas (ppm)', borderColor: '#ff6384', data: [] }
+            ]}, options: { responsive: true }
+        });
+        const ctx3 = document.getElementById('node03Chart').getContext('2d');
+        node03Chart = new Chart(ctx3, {
+            type: 'line', data: { labels: [], datasets: [
+                { label: 'Temp (°C)', borderColor: '#ff9f40', data: [] },
+                { label: 'Humidity (%)', borderColor: '#4bc0c0', data: [] },
+                { label: 'Gas (ppm)', borderColor: '#ff6384', data: [] }
+            ]}, options: { responsive: true }
+        });
+    }
+
+    // Update charts (push new values)
+    function updateChartData(chart, newValues, labelsArray) {
+        const timestamp = getCurrentTimeLabel();
+        labelsArray.push(timestamp);
+        if (labelsArray.length > MAX_DATA_POINTS) labelsArray.shift();
+        chart.data.labels = [...labelsArray];
+        for (let i = 0; i < chart.data.datasets.length; i++) {
+            if (newValues[i] !== undefined) {
+                chart.data.datasets[i].data.push(newValues[i]);
+                if (chart.data.datasets[i].data.length > MAX_DATA_POINTS) chart.data.datasets[i].data.shift();
+            }
+        }
+        chart.update('none');
+    }
+
+    // Gas flashing logic for Node02 & Node03
+    function updateGasFlash(nodeId, gasValue, threshold) {
+        const indicatorSpan = document.getElementById(`gasIndicator${nodeId}`);
+        const gasSpan = document.getElementById(`node${nodeId}_gas`);
+        if (!indicatorSpan) return;
+        const isExceeded = gasValue > threshold;
+        if (isExceeded) {
+            indicatorSpan.innerHTML = '⚠️ GAS HIGH! FLASHING ⚠️';
+            indicatorSpan.classList.add('gas-flashing');
+            if (gasSpan) gasSpan.style.fontWeight = 'bold';
+        } else {
+            indicatorSpan.innerHTML = '✓ Normal';
+            indicatorSpan.classList.remove('gas-flashing');
+            if (gasSpan) gasSpan.style.fontWeight = 'normal';
+        }
+    }
+
+    // Fetch node_data + update UI, charts, thresholds
+    async function fetchAndUpdateData() {
+        try {
+            const res = await fetch('/api/node_data');
+            if (!res.ok) throw new Error('Failed fetch node data');
+            const data = await res.json();
+            // data expected: { node_01: {temperature, humidity, light_level, buzzer_active, is_muted, ...}, node_02: {temperature, humidity, gas, ...}, node_03: {...}, thresholds: {node_02_gas_threshold, node_03_gas_threshold} }
+            const n1 = data.node_01 || {};
+            const n2 = data.node_02 || {};
+            const n3 = data.node_03 || {};
+            if (data.thresholds) {
+                if (data.thresholds.node_02_gas_threshold !== undefined) gasThresholds.node_02 = data.thresholds.node_02_gas_threshold;
+                if (data.thresholds.node_03_gas_threshold !== undefined) gasThresholds.node_03 = data.thresholds.node_03_gas_threshold;
+            }
+            // Update overview
+            document.getElementById('ov_temp01').innerText = n1.temperature?.toFixed(1) ?? '--';
+            document.getElementById('ov_hum01').innerText = n1.humidity?.toFixed(1) ?? '--';
+            document.getElementById('ov_light01').innerText = n1.light_level?.toFixed(0) ?? '--';
+            document.getElementById('ov_temp02').innerText = n2.temperature?.toFixed(1) ?? '--';
+            document.getElementById('ov_hum02').innerText = n2.humidity?.toFixed(1) ?? '--';
+            document.getElementById('ov_gas02').innerText = n2.gas?.toFixed(0) ?? '--';
+            document.getElementById('ov_temp03').innerText = n3.temperature?.toFixed(1) ?? '--';
+            document.getElementById('ov_hum03').innerText = n3.humidity?.toFixed(1) ?? '--';
+            document.getElementById('ov_gas03').innerText = n3.gas?.toFixed(0) ?? '--';
+            // Node specific panels
+            document.getElementById('node01_temp_val').innerText = n1.temperature?.toFixed(1) ?? '--';
+            document.getElementById('node01_hum_val').innerText = n1.humidity?.toFixed(1) ?? '--';
+            document.getElementById('node01_light_val').innerText = n1.light_level?.toFixed(0) ?? '--';
+            document.getElementById('node01_buzzer_val').innerText = n1.buzzer_active ? 'Active' : 'Inactive';
+            document.getElementById('node01_muted_val').innerText = n1.is_muted ? 'Yes' : 'No';
+            document.getElementById('node02_temp').innerText = n2.temperature?.toFixed(1) ?? '--';
+            document.getElementById('node02_hum').innerText = n2.humidity?.toFixed(1) ?? '--';
+            document.getElementById('node02_gas').innerText = n2.gas?.toFixed(0) ?? '--';
+            document.getElementById('node03_temp').innerText = n3.temperature?.toFixed(1) ?? '--';
+            document.getElementById('node03_hum').innerText = n3.humidity?.toFixed(1) ?? '--';
+            document.getElementById('node03_gas').innerText = n3.gas?.toFixed(0) ?? '--';
+            // Update thresholds display
+            document.getElementById('node02_threshold_display').innerText = gasThresholds.node_02;
+            document.getElementById('node03_threshold_display').innerText = gasThresholds.node_03;
+            // gas flash
+            updateGasFlash('02', n2.gas, gasThresholds.node_02);
+            updateGasFlash('03', n3.gas, gasThresholds.node_03);
+            // Charts update
+            if (node01Chart) {
+                updateChartData(node01Chart, [n1.temperature, n1.humidity, n1.light_level], timeLabels);
+            }
+            if (node02Chart) {
+                let node02Labels = node02Chart.data.labels.length ? [...node02Chart.data.labels] : [];
+                updateChartData(node02Chart, [n2.temperature, n2.humidity, n2.gas], node02Labels);
+                node02Chart.data.labels = node02Labels;
+            }
+            if (node03Chart) {
+                let node03Labels = node03Chart.data.labels.length ? [...node03Chart.data.labels] : [];
+                updateChartData(node03Chart, [n3.temperature, n3.humidity, n3.gas], node03Labels);
+                node03Chart.data.labels = node03Labels;
+            }
+        } catch (err) { console.warn("Data fetch error:", err); }
+    }
+
+    // Fetch events from /api/events
+    async function fetchEvents() {
+        try {
+            const res = await fetch('/api/events');
+            if (!res.ok) throw new Error('events fetch error');
+            const events = await res.json();
+            const eventsDiv = document.getElementById('eventsList');
+            if (events && events.length) {
+                eventsDiv.innerHTML = events.map(ev => `<div class="border-bottom py-2"><i class="fas fa-clock me-2 text-secondary"></i><strong>${ev.timestamp || 'now'}</strong> - ${ev.description || ev.type} </div>`).join('');
+            } else {
+                eventsDiv.innerHTML = '<div class="text-muted">No recent security events</div>';
+            }
+        } catch (err) { console.warn("events error:", err); }
+    }
+
+    // Update threshold (admin only) -> POST /api/update_threshold
+    function setupThresholdUpdates() {
+        {% if is_admin %}
+        const btn02 = document.getElementById('updateThreshold02Btn');
+        const btn03 = document.getElementById('updateThreshold03Btn');
+        if (btn02) {
+            btn02.addEventListener('click', async () => {
+                const newVal = parseInt(document.getElementById('node02_threshold_input').value);
+                if (isNaN(newVal)) return;
+                try {
+                    const res = await fetch('/api/update_threshold', {
+                        method: 'POST', headers: {'Content-Type':'application/json'},
+                        body: JSON.stringify({ node_id: 'node_02', threshold_type: 'gas', value: newVal })
+                    });
+                    if (res.ok) {
+                        gasThresholds.node_02 = newVal;
+                        document.getElementById('node02_threshold_display').innerText = newVal;
+                        fetchAndUpdateData(); // refresh data to recheck flashing
+                    }
+                } catch(e) { console.error(e); }
+            });
+        }
+        if (btn03) {
+            btn03.addEventListener('click', async () => {
+                const newVal = parseInt(document.getElementById('node03_threshold_input').value);
+                if (isNaN(newVal)) return;
+                const res = await fetch('/api/update_threshold', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ node_id: 'node_03', threshold_type: 'gas', value: newVal })
+                });
+                if (res.ok) {
+                    gasThresholds.node_03 = newVal;
+                    document.getElementById('node03_threshold_display').innerText = newVal;
+                    fetchAndUpdateData();
+                }
+            });
+        }
+        {% endif %}
+    }
+
+    // Simulation endpoints (admin only)
+    function setupSimulation() {
+        {% if is_admin %}
+        const replayBtn = document.getElementById('simReplayBtn');
+        const replayStop = document.getElementById('simReplayStopBtn');
+        const disconnectBtn = document.getElementById('simDisconnectBtn');
+        const disconnectStop = document.getElementById('simDisconnectStopBtn');
+        const sensorErrBtn = document.getElementById('simSensorErrorBtn');
+        const sensorClear = document.getElementById('simSensorClearBtn');
+        const callSim = (action, subaction) => fetch('/api/simulation', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type: action, state: subaction }) }).catch(console.warn);
+        if(replayBtn) replayBtn.onclick = () => callSim('replay_attack', 'start');
+        if(replayStop) replayStop.onclick = () => callSim('replay_attack', 'stop');
+        if(disconnectBtn) disconnectBtn.onclick = () => callSim('disconnection', 'trigger');
+        if(disconnectStop) disconnectStop.onclick = () => callSim('disconnection', 'restore');
+        if(sensorErrBtn) sensorErrBtn.onclick = () => callSim('sensor_error', 'inject');
+        if(sensorClear) sensorClear.onclick = () => callSim('sensor_error', 'clear');
+        {% endif %}
+    }
+
+    // Chatbot: send message to /api/chat (Gemini Pro)
+    function setupChat() {
+        const sendBtn = document.getElementById('sendChatBtn');
+        const chatInput = document.getElementById('chatInput');
+        const messagesDiv = document.getElementById('chatMessages');
+        async function sendMessage() {
+            const msg = chatInput.value.trim();
+            if (!msg) return;
+            messagesDiv.innerHTML += `<div class="chat-bubble-user"><i class="fas fa-user me-1"></i> ${escapeHtml(msg)}</div>`;
+            chatInput.value = '';
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: msg })
+                });
+                const data = await res.json();
+                const reply = data.answer || "Sorry, couldn't process the request.";
+                messagesDiv.innerHTML += `<div class="chat-bubble-bot"><i class="fas fa-robot me-1"></i> ${escapeHtml(reply)}</div>`;
+            } catch (err) {
+                messagesDiv.innerHTML += `<div class="chat-bubble-bot text-danger">⚠️ AI service error: ${err.message}</div>`;
+            }
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        sendBtn.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+        function escapeHtml(str) { return str.replace(/[&<>]/g, function(m){if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+    }
+
+    // Data refresh interval + events poll
+    let intervalId;
+    function startPolling() {
+        fetchAndUpdateData();
+        fetchEvents();
+        intervalId = setInterval(() => {
+            fetchAndUpdateData();
+            fetchEvents();
+        }, 3500);
+    }
+
+    // Bootstrap JS for tabs
+    function loadBootstrap() {
+        const script = document.createElement('script');
+        script.src = "https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js";
+        script.onload = () => {
+            initCharts();
+            setupThresholdUpdates();
+            setupSimulation();
+            setupChat();
+            startPolling();
+        };
+        document.head.appendChild(script);
+    }
+    loadBootstrap();
+</script>
+</body>
+</html>
