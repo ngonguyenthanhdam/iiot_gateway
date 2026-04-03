@@ -57,9 +57,39 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_database():
-    """Initialize database tables if they don't exist"""
+    """Initialize ALL required database tables for real MQTT data"""
     with get_db_connection() as conn:
-        # Create thresholds table
+        # 1. Devices table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id TEXT NOT NULL UNIQUE,
+                sensor_type TEXT,
+                location TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 2. Sensor logs table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS sensor_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id INTEGER NOT NULL,
+                temp REAL,
+                humi REAL,
+                gas INTEGER,
+                light_level INTEGER,
+                buzzer_active BOOLEAN,
+                is_muted BOOLEAN,
+                status TEXT,
+                msg_id INTEGER,
+                timestamp INTEGER,
+                received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(device_id) REFERENCES devices(id)
+            )
+        ''')
+
+        # 3. Thresholds table 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS thresholds (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +100,29 @@ def init_database():
             )
         ''')
 
-        # Insert default thresholds if not exist
+        # 4. System events table
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS system_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER,
+                severity TEXT,
+                description TEXT
+            )
+        ''')
+
+        # Insert default devices
+        default_devices = [
+            ('ESP32_SEC_01', 'ENV_MONITOR', 'Factory Floor - Sector 01'),
+            ('ESP8266_SEC_02', 'DHT11+MQ2', 'Factory Floor - Sector 02'),
+            ('ESP8266_SEC_03', 'DHT11+MQ2', 'Factory Floor - Sector 03')
+        ]
+        for node_id, sensor_type, location in default_devices:
+            conn.execute('''
+                INSERT OR IGNORE INTO devices (node_id, sensor_type, location)
+                VALUES (?, ?, ?)
+            ''', (node_id, sensor_type, location))
+
+        # Default thresholds
         for node_id in ['node_02', 'node_03']:
             conn.execute('''
                 INSERT OR IGNORE INTO thresholds (node_id, gas_threshold)
@@ -78,6 +130,7 @@ def init_database():
             ''', (node_id,))
 
         conn.commit()
+        print("✅ Database initialized successfully (all tables created)")
 
 
 def get_threshold(node_id: str) -> int:
