@@ -116,7 +116,9 @@ def init_database():
             ('sensor_logs', 'light_level',   'INTEGER'),
             ('sensor_logs', 'buzzer_active', 'INTEGER'),
             ('sensor_logs', 'is_muted',      'INTEGER'),
-            ('sensor_logs', 'gas',           'INTEGER')
+            ('sensor_logs', 'gas',           'INTEGER'),
+            ('sensor_logs', 'received_at',   'DATETIME'),
+            ('sensor_logs', 'captured_at',   'DATETIME')
         ]
 
         for table, col, col_type in columns_to_add:
@@ -172,40 +174,66 @@ def update_threshold(node_id: str, threshold: int):
 
 
 def get_latest_sensor_data() -> Dict[str, Any]:
-    """Get latest sensor data for all nodes - SAFE & SIMPLE version"""
+    """Get latest sensor data for all nodes - robust version with logging"""
     try:
         with get_db_connection() as conn:
-            node_data = {}
+            node_data = {
+                'node_01': {},
+                'node_02': {},
+                'node_03': {},
+            }
 
-            # Query latest record for each known node (simple and reliable)
-            for mqtt_node, ui_node in NODE_ID_MAPPING.items():
-                row = conn.execute('''
-                    SELECT sl.temp, sl.humi, sl.gas, sl.light_level,
-                           sl.buzzer_active, sl.is_muted,
-                           sl.status, sl.msg_id, sl.timestamp
-                    FROM sensor_logs sl
-                    JOIN devices d ON sl.device_id = d.id
-                    WHERE d.node_id = ?
-                    ORDER BY sl.timestamp DESC
-                    LIMIT 1
-                ''', (mqtt_node,)).fetchone()
+            # Get latest sensor row for each device_id (all nodes in one query)
+            rows = conn.execute('''
+                SELECT d.node_id AS mqtt_node,
+                       sl.temp,
+                       sl.humi,
+                       sl.gas,
+                       sl.light_level,
+                       sl.buzzer_active,
+                       sl.is_muted,
+                       sl.status,
+                       sl.msg_id,
+                       sl.timestamp
+                FROM sensor_logs sl
+                JOIN devices d ON sl.device_id = d.id
+                JOIN (
+                    SELECT device_id, MAX(timestamp) AS max_ts
+                    FROM sensor_logs
+                    GROUP BY device_id
+                ) latest ON sl.device_id = latest.device_id AND sl.timestamp = latest.max_ts
+            ''').fetchall()
 
-                if row:
-                    data = {
-                        'temperature': row['temp'],
-                        'humidity': row['humi'],
-                        'gas': row['gas'],
-                        'light_level': row['light_level'],
-                        'buzzer_active': bool(row['buzzer_active']) if row['buzzer_active'] is not None else False,
-                        'is_muted': bool(row['is_muted']) if row['is_muted'] is not None else False,
-                        'status': row['status'],
-                        'msg_id': row['msg_id'],
-                        'timestamp': row['timestamp']
-                    }
-                else:
-                    data = {}  # No data yet for this node
+            print(f"[DEBUG] get_latest_sensor_data rows count={len(rows)}")
+            for row in rows:
+                print(f"[DEBUG] row: {dict(row)}")
+                mqtt_node = row['mqtt_node']
+                ui_node = NODE_ID_MAPPING.get(mqtt_node)
 
-                node_data[ui_node] = data
+                if not ui_node:
+                    # Fallback mapping based on known identifiers
+                    if mqtt_node.startswith('ESP32'):
+                        ui_node = 'node_01'
+                    elif mqtt_node.endswith('_02'):
+                        ui_node = 'node_02'
+                    elif mqtt_node.endswith('_03'):
+                        ui_node = 'node_03'
+
+                if not ui_node:
+                    print(f"[WARNING] Unmapped MQTT node_id in DB: {mqtt_node}")
+                    continue
+
+                node_data[ui_node] = {
+                    'temperature': row['temp'],
+                    'humidity': row['humi'],
+                    'gas': row['gas'],
+                    'light_level': row['light_level'],
+                    'buzzer_active': bool(row['buzzer_active']) if row['buzzer_active'] is not None else False,
+                    'is_muted': bool(row['is_muted']) if row['is_muted'] is not None else False,
+                    'status': row['status'],
+                    'msg_id': row['msg_id'],
+                    'timestamp': row['timestamp']
+                }
 
             # Add thresholds
             node_data['thresholds'] = {
@@ -213,11 +241,11 @@ def get_latest_sensor_data() -> Dict[str, Any]:
                 'node_03_gas_threshold': get_threshold('node_03')
             }
 
+            print(f"[DEBUG] get_latest_sensor_data returning: {node_data}")
             return node_data
 
     except Exception as e:
         print(f"❌ ERROR in get_latest_sensor_data: {e}")
-        # Return empty structure so dashboard doesn't crash
         return {
             'node_01': {},
             'node_02': {},
