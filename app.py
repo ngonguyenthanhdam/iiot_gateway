@@ -155,60 +155,61 @@ def update_threshold(node_id: str, threshold: int):
 
 
 def get_latest_sensor_data() -> Dict[str, Any]:
-    """Get latest sensor data for all nodes from database"""
-    with get_db_connection() as conn:
-        # Get latest reading for each device
-        query = '''
-            SELECT sl.device_id, d.node_id, d.sensor_type,
-                   sl.temp, sl.humi, sl.gas, sl.light_level,
-                   sl.buzzer_active, sl.is_muted,
-                   sl.status, sl.msg_id, sl.timestamp
-            FROM sensor_logs sl
-            INNER JOIN devices d ON sl.device_id = d.id
-            WHERE sl.id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY timestamp DESC) AS rn
-                    FROM sensor_logs
-                ) WHERE rn = 1
-            )
-            ORDER BY d.node_id
-        '''
+    """Get latest sensor data for all nodes - SAFE & SIMPLE version"""
+    try:
+        with get_db_connection() as conn:
+            node_data = {}
 
-        readings = conn.execute(query).fetchall()
+            # Query latest record for each known node (simple and reliable)
+            for mqtt_node, ui_node in NODE_ID_MAPPING.items():
+                row = conn.execute('''
+                    SELECT sl.temp, sl.humi, sl.gas, sl.light_level,
+                           sl.buzzer_active, sl.is_muted,
+                           sl.status, sl.msg_id, sl.timestamp
+                    FROM sensor_logs sl
+                    JOIN devices d ON sl.device_id = d.id
+                    WHERE d.node_id = ?
+                    ORDER BY sl.timestamp DESC
+                    LIMIT 1
+                ''', (mqtt_node,)).fetchone()
 
-        # Map to node format
-        node_data = {}
-        for reading in readings:
-            node_key = NODE_ID_MAPPING.get(reading['node_id'], reading['node_id'])
+                if row:
+                    data = {
+                        'temperature': row['temp'],
+                        'humidity': row['humi'],
+                        'gas': row['gas'],
+                        'light_level': row['light_level'],
+                        'buzzer_active': bool(row['buzzer_active']) if row['buzzer_active'] is not None else False,
+                        'is_muted': bool(row['is_muted']) if row['is_muted'] is not None else False,
+                        'status': row['status'],
+                        'msg_id': row['msg_id'],
+                        'timestamp': row['timestamp']
+                    }
+                else:
+                    data = {}  # No data yet for this node
 
-            data = {
-                'temperature': reading['temp'],
-                'humidity': reading['humi'],
-                'gas': reading['gas'],
-                'light_level': reading['light_level'],
-                'buzzer_active': bool(reading['buzzer_active']) if reading['buzzer_active'] is not None else None,
-                'is_muted': bool(reading['is_muted']) if reading['is_muted'] is not None else None,
-                'msg_id': reading['msg_id'],
-                'status': reading['status'],
-                'timestamp': reading['timestamp']
+                node_data[ui_node] = data
+
+            # Add thresholds
+            node_data['thresholds'] = {
+                'node_02_gas_threshold': get_threshold('node_02'),
+                'node_03_gas_threshold': get_threshold('node_03')
             }
 
-            # Remove None values for cleaner JSON
-            data = {k: v for k, v in data.items() if v is not None}
-            node_data[node_key] = data
+            return node_data
 
-        # Ensure all nodes have entries (even if no data)
-        for mapped_id in ['node_01', 'node_02', 'node_03']:
-            if mapped_id not in node_data:
-                node_data[mapped_id] = {}
-
-        # Add thresholds
-        node_data['thresholds'] = {
-            'node_02_gas_threshold': get_threshold('node_02'),
-            'node_03_gas_threshold': get_threshold('node_03')
+    except Exception as e:
+        print(f"❌ ERROR in get_latest_sensor_data: {e}")
+        # Return empty structure so dashboard doesn't crash
+        return {
+            'node_01': {},
+            'node_02': {},
+            'node_03': {},
+            'thresholds': {
+                'node_02_gas_threshold': 100,
+                'node_03_gas_threshold': 100
+            }
         }
-
-        return node_data
 
 
 @app.before_request
