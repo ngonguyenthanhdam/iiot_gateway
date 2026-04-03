@@ -257,7 +257,15 @@ void DatabaseManager::initSchema() {
 
     // Migrate existing databases to add new columns (safe ALTER TABLE)
     migrateSensorLogsTable();
+    migrateDevicesTable();
 }
+
+// -----------------------------------------------------------------------------
+// migrateDevicesTable
+//
+// Safely adds new columns to devices for backward compatibility.
+// Similar to migrateSensorLogsTable() but for the devices table.
+// -----------------------------------------------------------------------------
 
 // -----------------------------------------------------------------------------
 // migrateSensorLogsTable
@@ -302,6 +310,48 @@ void DatabaseManager::migrateSensorLogsTable() {
     // Add is_muted column if not exists
     if (!columnExists("is_muted")) {
         execSQL("ALTER TABLE sensor_logs ADD COLUMN is_muted INTEGER;");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// migrateDevicesTable
+//
+// Safely adds new columns to devices for backward compatibility.
+// Similar to migrateSensorLogsTable() but for the devices table.
+// -----------------------------------------------------------------------------
+void DatabaseManager::migrateDevicesTable() {
+    // Check if columns already exist to avoid ALTER TABLE errors
+    auto deviceColumnExists = [this](const string& colName) -> bool {
+        const char* sql = "PRAGMA table_info(devices);";
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+        if (rc != SQLITE_OK) return false;
+
+        bool exists = false;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+            if (name == colName) {
+                exists = true;
+                break;
+            }
+        }
+        sqlite3_finalize(stmt);
+        return exists;
+    };
+
+    // Add sensor_type column if not exists
+    if (!deviceColumnExists("sensor_type")) {
+        execSQL("ALTER TABLE devices ADD COLUMN sensor_type TEXT NOT NULL DEFAULT 'UNKNOWN';");
+    }
+
+    // Add has_gas column if not exists
+    if (!deviceColumnExists("has_gas")) {
+        execSQL("ALTER TABLE devices ADD COLUMN has_gas INTEGER NOT NULL DEFAULT 0;");
+    }
+
+    // Add last_msg_id column if not exists
+    if (!deviceColumnExists("last_msg_id")) {
+        execSQL("ALTER TABLE devices ADD COLUMN last_msg_id INTEGER NOT NULL DEFAULT 0;");
     }
 }
 
