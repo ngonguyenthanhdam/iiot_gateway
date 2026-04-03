@@ -417,4 +417,4 @@ if __name__ == '__main__':
     print("\n⚙️  Default mode: USER (read-only)")
     print("🔓 Admin mode: Available after login\n")
 
-    app.run(debug=True, host='localhost', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
