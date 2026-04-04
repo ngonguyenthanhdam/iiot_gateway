@@ -450,10 +450,21 @@
     }
 
     // Fetch node_data + update UI, charts, thresholds
-    async function fetchAndUpdateData() {
+    async function fetchAndUpdateData(retryCount = 0) {
         try {
             const res = await fetch('/api/node_data');
-            if (!res.ok) throw new Error('Failed fetch node data');
+            if (res.status === 429) {
+                // Rate limited, retry after delay
+                if (retryCount < 3) {
+                    console.warn(`Rate limited (429), retrying in ${2 ** retryCount} seconds...`);
+                    setTimeout(() => fetchAndUpdateData(retryCount + 1), (2 ** retryCount) * 1000);
+                    return;
+                } else {
+                    console.error("Max retries reached for rate limit.");
+                    return;
+                }
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}: Failed fetch node data`);
             const data = await res.json();
             // data expected: { node_01: {temperature, humidity, light_level, buzzer_active, is_muted, ...}, node_02: {temperature, humidity, gas, ...}, node_03: {...}, thresholds: {node_02_gas_threshold, node_03_gas_threshold} }
             const n1 = data.node_01 || {};
@@ -509,9 +520,19 @@
     }
 
     // Fetch events from /api/events
-    async function fetchEvents() {
+    async function fetchEvents(retryCount = 0) {
         try {
             const res = await fetch('/api/events');
+            if (res.status === 429) {
+                if (retryCount < 3) {
+                    console.warn(`Events fetch rate limited (429), retrying in ${2 ** retryCount} seconds...`);
+                    setTimeout(() => fetchEvents(retryCount + 1), (2 ** retryCount) * 1000);
+                    return;
+                } else {
+                    console.error("Max retries reached for events rate limit.");
+                    return;
+                }
+            }
             if (!res.ok) throw new Error('events fetch error');
             const events = await res.json();
             const eventsDiv = document.getElementById('eventsList');
@@ -620,7 +641,7 @@
         intervalId = setInterval(() => {
             fetchAndUpdateData();
             fetchEvents();
-        }, 3500);
+        }, 5000);  // Increased from 3500ms to 5000ms to reduce load
     }
 
     // Bootstrap JS for tabs
