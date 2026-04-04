@@ -183,7 +183,9 @@ def get_latest_sensor_data() -> Dict[str, Any]:
                 'node_03': {},
             }
 
-            # Get latest sensor row for each device_id (all nodes in one query)
+            # Get latest sensor row for each device_id using gateway receive time
+            # Device timestamp is useful for packet metadata, but may not always be monotonic.
+            # Use received_at to ensure the newest packet received by the gateway is selected.
             rows = conn.execute('''
                 SELECT d.node_id AS mqtt_node,
                        sl.temp,
@@ -194,14 +196,15 @@ def get_latest_sensor_data() -> Dict[str, Any]:
                        sl.is_muted,
                        sl.status,
                        sl.msg_id,
-                       sl.timestamp
+                       sl.timestamp,
+                       sl.received_at
                 FROM sensor_logs sl
                 JOIN devices d ON sl.device_id = d.id
                 JOIN (
-                    SELECT device_id, MAX(timestamp) AS max_ts
+                    SELECT device_id, MAX(received_at) AS max_received
                     FROM sensor_logs
                     GROUP BY device_id
-                ) latest ON sl.device_id = latest.device_id AND sl.timestamp = latest.max_ts
+                ) latest ON sl.device_id = latest.device_id AND sl.received_at = latest.max_received
             ''').fetchall()
 
             print(f"[DEBUG] get_latest_sensor_data: Fetched {len(rows)} rows from DB")
