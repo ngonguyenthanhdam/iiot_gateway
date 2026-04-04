@@ -257,7 +257,59 @@ def get_latest_sensor_data() -> Dict[str, Any]:
         }
 
 
-# Exempt polling APIs from rate limiting to prevent 429 errors during frequent requests
+@app.before_request
+def before_request():
+    """Set session to permanent before each request"""
+    session.permanent = True
+
+
+# ==================== MAIN ROUTES ====================
+
+@app.route('/')
+def index():
+    """Redirect root to dashboard"""
+    return redirect(url_for('dashboard'))
+
+
+@app.route('/dashboard')
+def dashboard():
+    """
+    Main dashboard route - renders dashboard as Jinja2 template.
+    Default: is_admin = False (User mode)
+    """
+    is_admin = session.get('is_admin', False)
+    return render_template('index.html', is_admin=is_admin)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def login():
+    """
+    Admin login route with rate limiting and bcrypt password validation.
+    """
+    error = None
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+
+        # Validate password using bcrypt
+        if bcrypt.checkpw(password.encode('utf-8'), ADMIN_PASSWORD_HASH):
+            session['is_admin'] = True
+            return redirect(url_for('dashboard'))
+        else:
+            error = 'Invalid password'
+
+    return render_template('login.html', error=error)
+
+
+@app.route('/logout')
+def logout():
+    """Clear session and redirect to dashboard (User mode)"""
+    session.clear()
+    return redirect(url_for('dashboard'))
+
+
+# ==================== API ENDPOINTS ====================
 @limiter.exempt
 @app.route('/api/node_data')
 def node_data():
