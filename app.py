@@ -183,9 +183,7 @@ def get_latest_sensor_data() -> Dict[str, Any]:
                 'node_03': {},
             }
 
-            # Get latest sensor row for each device_id using gateway receive time
-            # Device timestamp is useful for packet metadata, but may not always be monotonic.
-            # Use received_at to ensure the newest packet received by the gateway is selected.
+            # Get latest sensor row for each device_id (all nodes in one query)
             rows = conn.execute('''
                 SELECT d.node_id AS mqtt_node,
                        sl.temp,
@@ -196,15 +194,14 @@ def get_latest_sensor_data() -> Dict[str, Any]:
                        sl.is_muted,
                        sl.status,
                        sl.msg_id,
-                       sl.timestamp,
-                       sl.received_at
+                       sl.timestamp
                 FROM sensor_logs sl
                 JOIN devices d ON sl.device_id = d.id
                 JOIN (
-                    SELECT device_id, MAX(received_at) AS max_received
+                    SELECT device_id, MAX(timestamp) AS max_ts
                     FROM sensor_logs
                     GROUP BY device_id
-                ) latest ON sl.device_id = latest.device_id AND sl.received_at = latest.max_received
+                ) latest ON sl.device_id = latest.device_id AND sl.timestamp = latest.max_ts
             ''').fetchall()
 
             print(f"[DEBUG] get_latest_sensor_data: Fetched {len(rows)} rows from DB")
@@ -260,59 +257,7 @@ def get_latest_sensor_data() -> Dict[str, Any]:
         }
 
 
-@app.before_request
-def before_request():
-    """Set session to permanent before each request"""
-    session.permanent = True
-
-
-# ==================== MAIN ROUTES ====================
-
-@app.route('/')
-def index():
-    """Redirect root to dashboard"""
-    return redirect(url_for('dashboard'))
-
-
-@app.route('/dashboard')
-def dashboard():
-    """
-    Main dashboard route - renders dashboard as Jinja2 template.
-    Default: is_admin = False (User mode)
-    """
-    is_admin = session.get('is_admin', False)
-    return render_template('index.html', is_admin=is_admin)
-
-
-@app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")
-def login():
-    """
-    Admin login route with rate limiting and bcrypt password validation.
-    """
-    error = None
-
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-
-        # Validate password using bcrypt
-        if bcrypt.checkpw(password.encode('utf-8'), ADMIN_PASSWORD_HASH):
-            session['is_admin'] = True
-            return redirect(url_for('dashboard'))
-        else:
-            error = 'Invalid password'
-
-    return render_template('login.html', error=error)
-
-
-@app.route('/logout')
-def logout():
-    """Clear session and redirect to dashboard (User mode)"""
-    session.clear()
-    return redirect(url_for('dashboard'))
-
-
-# ==================== API ENDPOINTS ====================
+# Exempt polling APIs from rate limiting to prevent 429 errors during frequent requests
 @limiter.exempt
 @app.route('/api/node_data')
 def node_data():
