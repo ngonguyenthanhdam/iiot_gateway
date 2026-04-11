@@ -12,6 +12,7 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+import paho.mqtt.client as mqtt
 
 app = Flask(__name__)
 
@@ -37,6 +38,10 @@ app.template_folder = os.path.join(base_dir, 'templates')
 
 # Database configuration
 DB_PATH = os.path.join(base_dir, 'db', 'factory_data.db')
+
+# MQTT configuration
+MQTT_BROKER_IP = "192.168.1.2"
+MQTT_BROKER_PORT = 1883
 
 # Node ID mapping
 NODE_ID_MAPPING = {
@@ -94,7 +99,10 @@ def init_database():
             CREATE TABLE IF NOT EXISTS thresholds (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 node_id       TEXT NOT NULL UNIQUE,
-                gas_threshold INTEGER NOT NULL DEFAULT 100,
+                gas_warn      INTEGER DEFAULT 300,
+                gas_crit      INTEGER DEFAULT 600,
+                temp_warn     REAL DEFAULT 30.0,
+                temp_crit     REAL DEFAULT 35.0,
                 created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -144,32 +152,40 @@ def init_database():
         # Default thresholds
         for node_id in ['node_02', 'node_03']:
             conn.execute('''
-                INSERT OR IGNORE INTO thresholds (node_id, gas_threshold)
-                VALUES (?, 100)
+                INSERT OR IGNORE INTO thresholds (node_id, gas_warn, gas_crit, temp_warn, temp_crit)
+                VALUES (?, 300, 600, 30.0, 35.0)
             ''', (node_id,))
 
         conn.commit()
         print("✅ Database initialized successfully with migration!")
 
 
-def get_threshold(node_id: str) -> int:
-    """Get gas threshold for a node"""
+def get_thresholds(node_id: str) -> Dict[str, Any]:
+    """Get all thresholds for a node"""
     with get_db_connection() as conn:
         row = conn.execute(
-            'SELECT gas_threshold FROM thresholds WHERE node_id = ?',
+            'SELECT gas_warn, gas_crit, temp_warn, temp_crit FROM thresholds WHERE node_id = ?',
             (node_id,)
         ).fetchone()
-        return row['gas_threshold'] if row else 100
+        if row:
+            return {
+                'gas_warn': row['gas_warn'],
+                'gas_crit': row['gas_crit'],
+                'temp_warn': row['temp_warn'],
+                'temp_crit': row['temp_crit']
+            }
+        else:
+            return {'gas_warn': 300, 'gas_crit': 600, 'temp_warn': 30.0, 'temp_crit': 35.0}
 
 
-def update_threshold(node_id: str, threshold: int):
-    """Update gas threshold for a node"""
+def update_threshold(node_id: str, threshold_type: str, value: Any):
+    """Update a specific threshold for a node"""
     with get_db_connection() as conn:
-        conn.execute('''
+        conn.execute(f'''
             UPDATE thresholds
-            SET gas_threshold = ?, updated_at = CURRENT_TIMESTAMP
+            SET {threshold_type} = ?, updated_at = CURRENT_TIMESTAMP
             WHERE node_id = ?
-        ''', (threshold, node_id))
+        ''', (value, node_id))
         conn.commit()
 
 
@@ -237,8 +253,8 @@ def get_latest_sensor_data() -> Dict[str, Any]:
 
             # Add thresholds
             node_data['thresholds'] = {
-                'node_02_gas_threshold': get_threshold('node_02'),
-                'node_03_gas_threshold': get_threshold('node_03')
+                'node_02': get_thresholds('node_02'),
+                'node_03': get_thresholds('node_03')
             }
 
             print(f"[DEBUG] Returning node_data with keys: {list(node_data.keys())}")
@@ -365,7 +381,7 @@ def events():
 @app.route('/api/update_threshold', methods=['POST'])
 def update_threshold_api():
     """
-    Update gas threshold for a node (Admin only).
+    Update a threshold for a node (Admin only).
     Requires: is_admin = True
     Request body: { node_id, threshold_type, value }
     """
@@ -383,30 +399,92 @@ def update_threshold_api():
         if not node_id or not threshold_type or value is None:
             return jsonify({'error': 'Missing required fields'}), 400
 
+        valid_types = ['gas_warn', 'gas_crit', 'temp_warn', 'temp_crit']
+        if threshold_type not in valid_types:
+            return jsonify({'error': 'Invalid threshold type'}), 400
+
         try:
-            value = int(value)
-            if value < 0 or value > 10000:
-                return jsonify({'error': 'Threshold must be between 0 and 10000'}), 400
+            if 'temp' in threshold_type:
+                value = float(value)
+                if value < 0 or value > 100:
+                    return jsonify({'error': 'Temperature threshold must be between 0 and 100°C'}), 400
+            else:
+                value = int(value)
+                if value < 0 or value > 10000:
+                    return jsonify({'error': 'Gas threshold must be between 0 and 10000 ppm'}), 400
         except (ValueError, TypeError):
             return jsonify({'error': 'Invalid threshold value'}), 400
 
-        # Validate node and threshold type
-        if node_id not in ['node_02', 'node_03'] or threshold_type != 'gas':
-            return jsonify({'error': 'Unknown node or threshold type'}), 400
+        # Validate node
+        if node_id not in ['node_02', 'node_03']:
+            return jsonify({'error': 'Unknown node'}), 400
 
         # Update in database
-        update_threshold(node_id, value)
+        update_threshold(node_id, threshold_type, value)
+
+        # Publish to MQTT
+        mqtt_node_id = {'node_02': 'ESP8266_SEC_02', 'node_03': 'ESP8266_SEC_03'}[node_id]
+        topic = f"factory/sensors/{mqtt_node_id}/cmd"
+        payload = f'{{"cmd": "set_threshold", "{threshold_type}": {value}}}'
+        try:
+            client = mqtt.Client()
+            client.connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, 60)
+            client.publish(topic, payload)
+            client.disconnect()
+        except Exception as e:
+            return jsonify({'error': f'MQTT publish failed: {e}'}), 500
 
         return jsonify({
             'status': 'success',
-            'message': f'Threshold for {node_id} updated to {value} ppm'
+            'message': f'{threshold_type} for {node_id} updated to {value}'
         })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/simulation', methods=['POST'])
+@app.route('/api/mute_buzzer', methods=['POST'])
+def mute_buzzer_api():
+    """
+    Mute buzzer for a node (Admin only).
+    Requires: is_admin = True
+    Request body: { node_id, type }
+    """
+    # Check admin authorization
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
+
+    try:
+        data = request.get_json()
+        node_id = data.get('node_id')
+        buzzer_type = data.get('type')
+
+        # Validate input
+        if not node_id or not buzzer_type:
+            return jsonify({'error': 'Missing required fields'}), 400
+
+        if node_id not in ['node_02', 'node_03'] or buzzer_type not in ['gas', 'temp']:
+            return jsonify({'error': 'Invalid node or buzzer type'}), 400
+
+        # Publish to MQTT
+        mqtt_node_id = {'node_02': 'ESP8266_SEC_02', 'node_03': 'ESP8266_SEC_03'}[node_id]
+        topic = f"factory/sensors/{mqtt_node_id}/cmd"
+        payload = f'{{"cmd": "mute_{buzzer_type}"}}'
+        try:
+            client = mqtt.Client()
+            client.connect(MQTT_BROKER_IP, MQTT_BROKER_PORT, 60)
+            client.publish(topic, payload)
+            client.disconnect()
+        except Exception as e:
+            return jsonify({'error': f'MQTT publish failed: {e}'}), 500
+
+        return jsonify({
+            'status': 'success',
+            'message': f'{buzzer_type} buzzer for {node_id} muted'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 def simulation():
     """
     Trigger simulation events (Admin only).

@@ -260,20 +260,59 @@
                             <span id="gasIndicator02" class="ms-2 threshold-badge">⏺ Normal</span>
                         </div>
                     </div>
-                    <div class="row mt-3 align-items-center">
-                        <div class="col-md-6"><i class="fas fa-tachometer-alt"></i> Gas Threshold: <strong id="node02_threshold_display">--</strong> ppm</div>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <h6>Current Thresholds:</h6>
+                            <p>Gas Warn: <strong id="node02_gas_warn_display">300</strong> ppm | Gas Crit: <strong id="node02_gas_crit_display">600</strong> ppm</p>
+                            <p>Temp Warn: <strong id="node02_temp_warn_display">30.0</strong> °C | Temp Crit: <strong id="node02_temp_crit_display">35.0</strong> °C</p>
+                        </div>
                         {% if is_admin %}
-                        <div class="col-md-6 update-threshold-group">
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text">New Gas Threshold</span>
-                                <input type="number" id="node02_threshold_input" class="form-control" placeholder="ppm" value="100" step="5">
-                                <button class="btn btn-outline-primary" id="updateThreshold02Btn">Update Threshold</button>
+                        <div class="col-md-6">
+                            <h6>Update Thresholds:</h6>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Gas Warn (ppm)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node02_gas_warn_input" class="form-control" value="300" step="10">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateGasWarn02Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Gas Crit (ppm)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node02_gas_crit_input" class="form-control" value="600" step="10">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateGasCrit02Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Temp Warn (°C)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node02_temp_warn_input" class="form-control" value="30.0" step="0.5">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateTempWarn02Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Temp Crit (°C)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node02_temp_crit_input" class="form-control" value="35.0" step="0.5">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateTempCrit02Btn">Update</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         {% else %}
                         <div class="col-md-6 text-muted"><i class="fas fa-lock"></i> Threshold update restricted (User mode)</div>
                         {% endif %}
                     </div>
+                    {% if is_admin %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Mute Buzzers:</h6>
+                            <button class="btn btn-warning btn-sm me-2" id="muteGas02Btn"><i class="fas fa-volume-mute"></i> Mute Gas Buzzer</button>
+                            <button class="btn btn-warning btn-sm" id="muteTemp02Btn"><i class="fas fa-volume-mute"></i> Mute Temp Buzzer</button>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -293,19 +332,58 @@
                         </div>
                     </div>
                     <div class="row mt-3">
-                        <div class="col-md-6"><i class="fas fa-tachometer-alt"></i> Gas Threshold: <strong id="node03_threshold_display">--</strong> ppm</div>
+                        <div class="col-md-6">
+                            <h6>Current Thresholds:</h6>
+                            <p>Gas Warn: <strong id="node03_gas_warn_display">300</strong> ppm | Gas Crit: <strong id="node03_gas_crit_display">600</strong> ppm</p>
+                            <p>Temp Warn: <strong id="node03_temp_warn_display">30.0</strong> °C | Temp Crit: <strong id="node03_temp_crit_display">35.0</strong> °C</p>
+                        </div>
                         {% if is_admin %}
-                        <div class="col-md-6 update-threshold-group">
-                            <div class="input-group input-group-sm">
-                                <span class="input-group-text">New Gas Threshold</span>
-                                <input type="number" id="node03_threshold_input" class="form-control" placeholder="ppm" value="100" step="5">
-                                <button class="btn btn-outline-primary" id="updateThreshold03Btn">Update Threshold</button>
+                        <div class="col-md-6">
+                            <h6>Update Thresholds:</h6>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small">Gas Warn (ppm)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node03_gas_warn_input" class="form-control" value="300" step="10">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateGasWarn03Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Gas Crit (ppm)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node03_gas_crit_input" class="form-control" value="600" step="10">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateGasCrit03Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Temp Warn (°C)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node03_temp_warn_input" class="form-control" value="30.0" step="0.5">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateTempWarn03Btn">Update</button>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Temp Crit (°C)</label>
+                                    <div class="input-group input-group-sm">
+                                        <input type="number" id="node03_temp_crit_input" class="form-control" value="35.0" step="0.5">
+                                        <button class="btn btn-outline-primary btn-sm" id="updateTempCrit03Btn">Update</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         {% else %}
-                        <div class="col-md-6 text-muted"><i class="fas fa-lock"></i> Threshold update restricted</div>
+                        <div class="col-md-6 text-muted"><i class="fas fa-lock"></i> Threshold update restricted (User mode)</div>
                         {% endif %}
                     </div>
+                    {% if is_admin %}
+                    <div class="row mt-3">
+                        <div class="col-12">
+                            <h6>Mute Buzzers:</h6>
+                            <button class="btn btn-warning btn-sm me-2" id="muteGas03Btn"><i class="fas fa-volume-mute"></i> Mute Gas Buzzer</button>
+                            <button class="btn btn-warning btn-sm" id="muteTemp03Btn"><i class="fas fa-volume-mute"></i> Mute Temp Buzzer</button>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -378,8 +456,8 @@
     let timeLabels = [];
     const MAX_DATA_POINTS = 20;
 
-    // thresholds state (gas)
-    let gasThresholds = { node_02: 100, node_03: 100 };
+    // thresholds state (gas, temp)
+    let thresholds = { node_02: {gas_crit: 600}, node_03: {gas_crit: 600} };
 
     // Helper: format time for chart labels
     function getCurrentTimeLabel() {
@@ -471,8 +549,8 @@
             const n2 = data.node_02 || {};
             const n3 = data.node_03 || {};
             if (data.thresholds) {
-                if (data.thresholds.node_02_gas_threshold !== undefined) gasThresholds.node_02 = data.thresholds.node_02_gas_threshold;
-                if (data.thresholds.node_03_gas_threshold !== undefined) gasThresholds.node_03 = data.thresholds.node_03_gas_threshold;
+                if (data.thresholds.node_02) thresholds.node_02 = data.thresholds.node_02;
+                if (data.thresholds.node_03) thresholds.node_03 = data.thresholds.node_03;
             }
             // Update overview
             document.getElementById('ov_temp01').innerText = n1.temperature?.toFixed(1) ?? '--';
@@ -497,11 +575,17 @@
             document.getElementById('node03_hum').innerText = n3.humidity?.toFixed(1) ?? '--';
             document.getElementById('node03_gas').innerText = n3.gas?.toFixed(0) ?? '--';
             // Update thresholds display
-            document.getElementById('node02_threshold_display').innerText = gasThresholds.node_02;
-            document.getElementById('node03_threshold_display').innerText = gasThresholds.node_03;
+            document.getElementById('node02_gas_warn_display').innerText = thresholds.node_02.gas_warn;
+            document.getElementById('node02_gas_crit_display').innerText = thresholds.node_02.gas_crit;
+            document.getElementById('node02_temp_warn_display').innerText = thresholds.node_02.temp_warn;
+            document.getElementById('node02_temp_crit_display').innerText = thresholds.node_02.temp_crit;
+            document.getElementById('node03_gas_warn_display').innerText = thresholds.node_03.gas_warn;
+            document.getElementById('node03_gas_crit_display').innerText = thresholds.node_03.gas_crit;
+            document.getElementById('node03_temp_warn_display').innerText = thresholds.node_03.temp_warn;
+            document.getElementById('node03_temp_crit_display').innerText = thresholds.node_03.temp_crit;
             // gas flash
-            updateGasFlash('02', n2.gas, gasThresholds.node_02);
-            updateGasFlash('03', n3.gas, gasThresholds.node_03);
+            updateGasFlash('02', n2.gas, thresholds.node_02.gas_crit);
+            updateGasFlash('03', n3.gas, thresholds.node_03.gas_crit);
             // Charts update
             if (node01Chart) {
                 updateChartData(node01Chart, [n1.temperature, n1.humidity, n1.light_level], timeLabels);
@@ -547,40 +631,87 @@
     // Update threshold (admin only) -> POST /api/update_threshold
     function setupThresholdUpdates() {
         {% if is_admin %}
-        const btn02 = document.getElementById('updateThreshold02Btn');
-        const btn03 = document.getElementById('updateThreshold03Btn');
-        if (btn02) {
-            btn02.addEventListener('click', async () => {
-                const newVal = parseInt(document.getElementById('node02_threshold_input').value);
-                if (isNaN(newVal)) return;
-                try {
-                    const res = await fetch('/api/update_threshold', {
-                        method: 'POST', headers: {'Content-Type':'application/json'},
-                        body: JSON.stringify({ node_id: 'node_02', threshold_type: 'gas', value: newVal })
-                    });
-                    if (res.ok) {
-                        gasThresholds.node_02 = newVal;
-                        document.getElementById('node02_threshold_display').innerText = newVal;
-                        fetchAndUpdateData(); // refresh data to recheck flashing
-                    }
-                } catch(e) { console.error(e); }
-            });
-        }
-        if (btn03) {
-            btn03.addEventListener('click', async () => {
-                const newVal = parseInt(document.getElementById('node03_threshold_input').value);
-                if (isNaN(newVal)) return;
-                const res = await fetch('/api/update_threshold', {
-                    method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({ node_id: 'node_03', threshold_type: 'gas', value: newVal })
+        // Node 02 buttons
+        const btns02 = [
+            { id: 'updateGasWarn02Btn', type: 'gas_warn', input: 'node02_gas_warn_input' },
+            { id: 'updateGasCrit02Btn', type: 'gas_crit', input: 'node02_gas_crit_input' },
+            { id: 'updateTempWarn02Btn', type: 'temp_warn', input: 'node02_temp_warn_input' },
+            { id: 'updateTempCrit02Btn', type: 'temp_crit', input: 'node02_temp_crit_input' }
+        ];
+        btns02.forEach(({ id, type, input }) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', async () => {
+                    const newVal = type.includes('temp') ? parseFloat(document.getElementById(input).value) : parseInt(document.getElementById(input).value);
+                    if (isNaN(newVal)) return;
+                    try {
+                        const res = await fetch('/api/update_threshold', {
+                            method: 'POST', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ node_id: 'node_02', threshold_type: type, value: newVal })
+                        });
+                        if (res.ok) {
+                            fetchAndUpdateData(); // refresh displays
+                        } else {
+                            alert('Update failed');
+                        }
+                    } catch(e) { console.error(e); }
                 });
-                if (res.ok) {
-                    gasThresholds.node_03 = newVal;
-                    document.getElementById('node03_threshold_display').innerText = newVal;
-                    fetchAndUpdateData();
-                }
-            });
-        }
+            }
+        });
+
+        // Node 03 buttons
+        const btns03 = [
+            { id: 'updateGasWarn03Btn', type: 'gas_warn', input: 'node03_gas_warn_input' },
+            { id: 'updateGasCrit03Btn', type: 'gas_crit', input: 'node03_gas_crit_input' },
+            { id: 'updateTempWarn03Btn', type: 'temp_warn', input: 'node03_temp_warn_input' },
+            { id: 'updateTempCrit03Btn', type: 'temp_crit', input: 'node03_temp_crit_input' }
+        ];
+        btns03.forEach(({ id, type, input }) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', async () => {
+                    const newVal = type.includes('temp') ? parseFloat(document.getElementById(input).value) : parseInt(document.getElementById(input).value);
+                    if (isNaN(newVal)) return;
+                    try {
+                        const res = await fetch('/api/update_threshold', {
+                            method: 'POST', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ node_id: 'node_03', threshold_type: type, value: newVal })
+                        });
+                        if (res.ok) {
+                            fetchAndUpdateData(); // refresh displays
+                        } else {
+                            alert('Update failed');
+                        }
+                    } catch(e) { console.error(e); }
+                });
+            }
+        });
+
+        // Mute buttons
+        const muteBtns = [
+            { id: 'muteGas02Btn', node: 'node_02', type: 'gas' },
+            { id: 'muteTemp02Btn', node: 'node_02', type: 'temp' },
+            { id: 'muteGas03Btn', node: 'node_03', type: 'gas' },
+            { id: 'muteTemp03Btn', node: 'node_03', type: 'temp' }
+        ];
+        muteBtns.forEach(({ id, node, type }) => {
+            const btn = document.getElementById(id);
+            if (btn) {
+                btn.addEventListener('click', async () => {
+                    try {
+                        const res = await fetch('/api/mute_buzzer', {
+                            method: 'POST', headers: {'Content-Type':'application/json'},
+                            body: JSON.stringify({ node_id: node, type: type })
+                        });
+                        if (res.ok) {
+                            alert(`${type} buzzer muted for ${node}`);
+                        } else {
+                            alert('Mute failed');
+                        }
+                    } catch(e) { console.error(e); }
+                });
+            }
+        });
         {% endif %}
     }
 
