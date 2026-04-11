@@ -153,7 +153,7 @@ def init_database():
         for node_id in ['node_02', 'node_03']:
             conn.execute('''
                 INSERT OR IGNORE INTO thresholds (node_id, gas_warn, gas_crit, temp_warn, temp_crit)
-                VALUES (?, 300, 600, 30.0, 35.0)
+                VALUES (?, 250, 400, 35.0, 45.0)
             ''', (node_id,))
 
         conn.commit()
