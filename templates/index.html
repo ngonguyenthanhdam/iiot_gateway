@@ -144,14 +144,7 @@
         <div class="d-flex gap-2 align-items-center">
             <div class="badge bg-light text-dark p-3 shadow-sm">
                 <i class="fas fa-shield-alt text-success me-1"></i> 
-                {% if is_admin %} Admin Mode <i class="fas fa-user-shield ms-1"></i> {% else %} User Mode (Read-only) {% endif %}
-            </div>
-            <div>
-                {% if is_admin %}
-                <a href="{{ url_for('logout') }}" class="btn btn-outline-danger btn-sm"><i class="fas fa-sign-out-alt me-1"></i>Logout</a>
-                {% else %}
-                <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-sm"><i class="fas fa-sign-in-alt me-1"></i>Admin Login</a>
-                {% endif %}
+                Admin Mode <i class="fas fa-user-shield ms-1"></i>
             </div>
         </div>
     </div>
@@ -170,11 +163,9 @@
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="node3-tab" data-bs-toggle="tab" data-bs-target="#node3" type="button" role="tab"><i class="fas fa-wifi me-1"></i>Node_03 (ESP8266)</button>
         </li>
-        {% if is_admin %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="simulation-tab" data-bs-toggle="tab" data-bs-target="#simulation" type="button" role="tab"><i class="fas fa-bug me-1"></i>Simulation & Security</button>
         </li>
-        {% endif %}
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="chat-tab" data-bs-toggle="tab" data-bs-target="#chat" type="button" role="tab"><i class="fas fa-robot me-1"></i>AI Q&A</button>
         </li>
@@ -263,8 +254,8 @@
                     <div class="row mt-3">
                         <div class="col-md-6">
                             <h6>Current Thresholds:</h6>
-                            <p>Gas Warn: <strong id="node02_gas_warn_display">300</strong> ppm | Gas Crit: <strong id="node02_gas_crit_display">600</strong> ppm</p>
-                            <p>Temp Warn: <strong id="node02_temp_warn_display">30.0</strong> °C | Temp Crit: <strong id="node02_temp_crit_display">35.0</strong> °C</p>
+                            <p>Gas Warn: <strong id="node02_gas_warn_display">350</strong> ppm | Gas Crit: <strong id="node02_gas_crit_display">400</strong> ppm</p>
+                            <p>Temp Warn: <strong id="node02_temp_warn_display">35.0</strong> °C | Temp Crit: <strong id="node02_temp_crit_display">45.0</strong> °C</p>
                         </div>
                         {% if is_admin %}
                         <div class="col-md-6">
@@ -273,28 +264,28 @@
                                 <div class="col-6">
                                     <label class="form-label small">Gas Warn (ppm)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node02_gas_warn_input" class="form-control" value="300" step="10">
+                                        <input type="number" id="node02_gas_warn_input" class="form-control" value="350" step="10">
                                         <button class="btn btn-outline-primary btn-sm" id="updateGasWarn02Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Gas Crit (ppm)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node02_gas_crit_input" class="form-control" value="600" step="10">
+                                        <input type="number" id="node02_gas_crit_input" class="form-control" value="400" step="10">
                                         <button class="btn btn-outline-primary btn-sm" id="updateGasCrit02Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Temp Warn (°C)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node02_temp_warn_input" class="form-control" value="30.0" step="0.5">
+                                        <input type="number" id="node02_temp_warn_input" class="form-control" value="35.0" step="0.5">
                                         <button class="btn btn-outline-primary btn-sm" id="updateTempWarn02Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Temp Crit (°C)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node02_temp_crit_input" class="form-control" value="35.0" step="0.5">
+                                        <input type="number" id="node02_temp_crit_input" class="form-control" value="45.0" step="0.5">
                                         <button class="btn btn-outline-primary btn-sm" id="updateTempCrit02Btn">Update</button>
                                     </div>
                                 </div>
@@ -334,8 +325,8 @@
                     <div class="row mt-3">
                         <div class="col-md-6">
                             <h6>Current Thresholds:</h6>
-                            <p>Gas Warn: <strong id="node03_gas_warn_display">300</strong> ppm | Gas Crit: <strong id="node03_gas_crit_display">600</strong> ppm</p>
-                            <p>Temp Warn: <strong id="node03_temp_warn_display">30.0</strong> °C | Temp Crit: <strong id="node03_temp_crit_display">35.0</strong> °C</p>
+                            <p>Gas Warn: <strong id="node03_gas_warn_display">350</strong> ppm | Gas Crit: <strong id="node03_gas_crit_display">400</strong> ppm</p>
+                            <p>Temp Warn: <strong id="node03_temp_warn_display">35.0</strong> °C | Temp Crit: <strong id="node03_temp_crit_display">45.0</strong> °C</p>
                         </div>
                         {% if is_admin %}
                         <div class="col-md-6">
@@ -344,28 +335,28 @@
                                 <div class="col-6">
                                     <label class="form-label small">Gas Warn (ppm)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node03_gas_warn_input" class="form-control" value="300" step="10">
+                                        <input type="number" id="node03_gas_warn_input" class="form-control" value="350" step="10">
                                         <button class="btn btn-outline-primary btn-sm" id="updateGasWarn03Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Gas Crit (ppm)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node03_gas_crit_input" class="form-control" value="600" step="10">
+                                        <input type="number" id="node03_gas_crit_input" class="form-control" value="400" step="10">
                                         <button class="btn btn-outline-primary btn-sm" id="updateGasCrit03Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Temp Warn (°C)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node03_temp_warn_input" class="form-control" value="30.0" step="0.5">
+                                        <input type="number" id="node03_temp_warn_input" class="form-control" value="35.0" step="0.5">
                                         <button class="btn btn-outline-primary btn-sm" id="updateTempWarn03Btn">Update</button>
                                     </div>
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small">Temp Crit (°C)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" id="node03_temp_crit_input" class="form-control" value="35.0" step="0.5">
+                                        <input type="number" id="node03_temp_crit_input" class="form-control" value="45.0" step="0.5">
                                         <button class="btn btn-outline-primary btn-sm" id="updateTempCrit03Btn">Update</button>
                                     </div>
                                 </div>
@@ -388,8 +379,7 @@
             </div>
         </div>
 
-        <!-- SIMULATION TAB (Admin only) -->
-        {% if is_admin %}
+        <!-- SIMULATION TAB -->
         <div class="tab-pane fade" id="simulation" role="tabpanel">
             <div class="row g-4">
                 <div class="col-md-4">
@@ -428,7 +418,6 @@
                 <div class="col-12 text-muted mt-2"><i class="fas fa-info-circle"></i> Simulation events appear in Security Events log (Overview tab).</div>
             </div>
         </div>
-        {% endif %}
 
         <!-- AI Q&A Chatbot (Gemini Pro via backend) -->
         <div class="tab-pane fade" id="chat" role="tabpanel">
@@ -447,7 +436,7 @@
             </div>
         </div>
     </div>
-    <footer class="text-center mt-5 pt-2 border-top">Secure IIoT Gateway © 2026 | Real-time data polling | RBAC enabled</footer>
+    <footer class="text-center mt-5 pt-2 border-top">Secure IIoT Gateway © 2026 | Real-time data polling | Admin mode</footer>
 </div>
 
 <script>
@@ -630,7 +619,6 @@
 
     // Update threshold (admin only) -> POST /api/update_threshold
     function setupThresholdUpdates() {
-        {% if is_admin %}
         // Node 02 buttons
         const btns02 = [
             { id: 'updateGasWarn02Btn', type: 'gas_warn', input: 'node02_gas_warn_input' },
@@ -712,12 +700,10 @@
                 });
             }
         });
-        {% endif %}
     }
 
     // Simulation endpoints (admin only)
     function setupSimulation() {
-        {% if is_admin %}
         const replayBtn = document.getElementById('simReplayBtn');
         const replayStop = document.getElementById('simReplayStopBtn');
         const disconnectBtn = document.getElementById('simDisconnectBtn');
@@ -731,7 +717,6 @@
         if(disconnectStop) disconnectStop.onclick = () => callSim('disconnection', 'restore');
         if(sensorErrBtn) sensorErrBtn.onclick = () => callSim('sensor_error', 'inject');
         if(sensorClear) sensorClear.onclick = () => callSim('sensor_error', 'clear');
-        {% endif %}
     }
 
     // Chatbot: send message to /api/chat (Gemini Pro)

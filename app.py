@@ -1,13 +1,12 @@
 """
 Secure IIoT Gateway Dashboard - Flask Backend
-Handles session management, routing, and API endpoints with real database integration.
-Default: User Mode (is_admin = False) until admin login.
+Handles routing and API endpoints with real database integration.
+All users have full admin-level access.
 """
 
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import bcrypt
 import sqlite3
 import os
 from datetime import datetime, timedelta
@@ -50,8 +49,6 @@ NODE_ID_MAPPING = {
     'ESP8266_SEC_03': 'node_03'
 }
 
-# Admin credentials (in production, store hashed in database)
-ADMIN_PASSWORD_HASH = bcrypt.hashpw('admin123'.encode('utf-8'), bcrypt.gensalt())
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -175,7 +172,7 @@ def get_thresholds(node_id: str) -> Dict[str, Any]:
                 'temp_crit': row['temp_crit']
             }
         else:
-            return {'gas_warn': 300, 'gas_crit': 600, 'temp_warn': 30.0, 'temp_crit': 35.0}
+            return {'gas_warn': 350, 'gas_crit': 400, 'temp_warn': 35.0, 'temp_crit': 45.0}
 
 
 def update_threshold(node_id: str, threshold_type: str, value: Any):
@@ -291,38 +288,8 @@ def index():
 def dashboard():
     """
     Main dashboard route - renders dashboard as Jinja2 template.
-    Default: is_admin = False (User mode)
     """
-    is_admin = session.get('is_admin', False)
-    return render_template('index.html', is_admin=is_admin)
-
-
-@app.route('/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")
-def login():
-    """
-    Admin login route with rate limiting and bcrypt password validation.
-    """
-    error = None
-
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-
-        # Validate password using bcrypt
-        if bcrypt.checkpw(password.encode('utf-8'), ADMIN_PASSWORD_HASH):
-            session['is_admin'] = True
-            return redirect(url_for('dashboard'))
-        else:
-            error = 'Invalid password'
-
-    return render_template('login.html', error=error)
-
-
-@app.route('/logout')
-def logout():
-    """Clear session and redirect to dashboard (User mode)"""
-    session.clear()
-    return redirect(url_for('dashboard'))
+    return render_template('index.html', is_admin=True)
 
 
 # ==================== API ENDPOINTS ====================
@@ -381,14 +348,9 @@ def events():
 @app.route('/api/update_threshold', methods=['POST'])
 def update_threshold_api():
     """
-    Update a threshold for a node (Admin only).
-    Requires: is_admin = True
+    Update a threshold for a node.
     Request body: { node_id, threshold_type, value }
     """
-    # Check admin authorization
-    if not session.get('is_admin', False):
-        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
-
     try:
         data = request.get_json()
         node_id = data.get('node_id')
@@ -446,14 +408,9 @@ def update_threshold_api():
 @app.route('/api/mute_buzzer', methods=['POST'])
 def mute_buzzer_api():
     """
-    Mute buzzer for a node (Admin only).
-    Requires: is_admin = True
+    Mute buzzer for a node.
     Request body: { node_id, type }
     """
-    # Check admin authorization
-    if not session.get('is_admin', False):
-        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
-
     try:
         data = request.get_json()
         node_id = data.get('node_id')
@@ -485,17 +442,15 @@ def mute_buzzer_api():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/simulation', methods=['POST'])
 def simulation():
     """
-    Trigger simulation events (Admin only).
+    Trigger simulation events.
     Simulates: replay attacks, node disconnections, sensor errors.
-    Requires: is_admin = True
     Request body: { type, state }
     """
-    # Check admin authorization
-    if not session.get('is_admin', False):
-        return jsonify({'error': 'Unauthorized - Admin access required'}), 403
-
     try:
         data = request.get_json()
         sim_type = data.get('type')
@@ -589,9 +544,6 @@ if __name__ == '__main__':
     print("Secure IIoT Gateway Dashboard - Flask Server")
     print("=" * 60)
     print("\n📊 Dashboard: http://localhost:5000/dashboard")
-    print("🔐 Admin Login: http://localhost:5000/login")
-    print("   Default password: admin123")
-    print("\n⚙️  Default mode: USER (read-only)")
-    print("🔓 Admin mode: Available after login\n")
+    print("🔓 Mode: ADMIN (full access)\n")
 
     app.run(debug=True, host='0.0.0.0', port=5000)
