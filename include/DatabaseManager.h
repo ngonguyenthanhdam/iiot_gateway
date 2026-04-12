@@ -239,6 +239,27 @@ private:
     bool updateLastMsgId(const std::string& nodeId, uint32_t msgId);
 
     // -------------------------------------------------------------------------
+    // migrateSensorLogsTable — safe ALTER TABLE migration for legacy DBs.
+    // -------------------------------------------------------------------------
+    void migrateSensorLogsTable();
+
+    // -------------------------------------------------------------------------
+    // migrateDevicesTable — safe ALTER TABLE migration for legacy DBs.
+    // -------------------------------------------------------------------------
+    void migrateDevicesTable();
+
+    // -------------------------------------------------------------------------
+    // migrateDoorEventsTable — safe ALTER TABLE migration for door_events.
+    // -------------------------------------------------------------------------
+    void migrateDoorEventsTable();
+
+    // -------------------------------------------------------------------------
+    // migrateRegisteredRfidCardsTable — safe ALTER TABLE migration for
+    // registered_rfid_cards.
+    // -------------------------------------------------------------------------
+    void migrateRegisteredRfidCardsTable();
+
+    // -------------------------------------------------------------------------
     // logSqliteError — writes a formatted SQLite error to stderr and the
     // system debug log (does not throw).
     // -------------------------------------------------------------------------
