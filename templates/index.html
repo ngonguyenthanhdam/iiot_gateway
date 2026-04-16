@@ -130,6 +130,46 @@
             font-weight: 700;
             font-size: 1.2rem;
         }
+        /* RFID Management styles */
+        #rfidCardsTable thead th {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #4a5568;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        #rfidCardsTable tbody tr:hover {
+            background-color: #f8fafc;
+        }
+        .rfid-uid-badge {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.8rem;
+            background: #edf2f7;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #cbd5e0;
+            color: #2d3748;
+            letter-spacing: 0.05em;
+        }
+        .rfid-filter-btn.active {
+            color: #fff;
+        }
+        .rfid-filter-btn[data-filter="all"].active { background:#6c757d; border-color:#6c757d; }
+        .rfid-filter-btn[data-filter="active"].active { background:#198754; border-color:#198754; }
+        .rfid-filter-btn[data-filter="revoked"].active { background:#dc3545; border-color:#dc3545; }
+        .door-state-locked   { background:#fff3cd; border-color:#ffc107 !important; }
+        .door-state-unlocked { background:#d1e7dd; border-color:#198754 !important; }
+        .door-state-fault    { background:#f8d7da; border-color:#dc3545 !important; }
+        .door-state-unknown  { background:#f0f4f8; border-color:#dee2e6 !important; }
+        .door-event-row {
+            border-left: 3px solid transparent;
+            padding: 0.4rem 0.6rem;
+            border-bottom: 1px solid #f0f4f8;
+            font-size: 0.83rem;
+        }
+        .door-event-row.sev-info     { border-left-color: #0d6efd; }
+        .door-event-row.sev-warning  { border-left-color: #ffc107; }
+        .door-event-row.sev-critical { border-left-color: #dc3545; background:#fff5f5; }
     </style>
 </head>
 <body>
@@ -219,10 +259,11 @@
             </div>
         </div>
 
-        <!-- NODE 01 (ESP32) - Chart: temp + humidity + light -->
+        <!-- NODE 01 (ESP32) - Chart: temp + humidity + light + RFID Management -->
         <div class="tab-pane fade" id="node1" role="tabpanel">
-            <div class="card">
-                <div class="card-header bg-white"><i class="fas fa-chart-line me-2 text-cyan"></i>Node_01 (ESP32) - Real-time Sensor Trends</div>
+            <!-- Sensor Trends Card -->
+            <div class="card mb-4">
+                <div class="card-header bg-white"><i class="fas fa-chart-line me-2 text-info"></i>Node_01 (ESP32) — Real-time Sensor Trends</div>
                 <div class="card-body">
                     <canvas id="node01Chart" width="400" height="200" style="max-height: 400px; width:100%"></canvas>
                     <hr>
@@ -232,6 +273,123 @@
                         <div class="col"><span class="badge bg-secondary">☀️ Light Intensity</span> <span id="node01_light_val" class="fw-bold ms-2">--</span> lux</div>
                         <div class="col"><span class="badge bg-secondary">🔊 Buzzer</span> <span id="node01_buzzer_val" class="fw-bold ms-2">--</span></div>
                         <div class="col"><span class="badge bg-secondary">🔇 Muted</span> <span id="node01_muted_val" class="fw-bold ms-2">--</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Door Status Card -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-door-open me-2 text-primary"></i>Node_01 — Door Control</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshDoorStatusBtn"><i class="fas fa-sync-alt me-1"></i>Refresh</button>
+                </div>
+                <div class="card-body">
+                    <div class="row align-items-center g-3">
+                        <div class="col-md-3 text-center">
+                            <div id="doorStateDisplay" class="p-3 rounded-3" style="background:#f0f4f8; border: 2px solid #dee2e6;">
+                                <i class="fas fa-lock fa-2x mb-2" id="doorStateIcon" style="color:#6c757d;"></i>
+                                <div class="fw-bold" id="doorStateLabel">UNKNOWN</div>
+                                <small class="text-muted" id="doorStateTs">—</small>
+                            </div>
+                        </div>
+                        <div class="col-md-5">
+                            <p class="mb-1"><strong>Last Trigger:</strong> <span id="doorLastTrigger" class="badge bg-light text-dark">—</span></p>
+                            <p class="mb-1"><strong>Alarm Active:</strong> <span id="doorAlarmActive" class="badge bg-success">No</span></p>
+                            <p class="mb-0"><strong>Fault State:</strong> <span id="doorFaultState" class="badge bg-success">No</span></p>
+                        </div>
+                        <div class="col-md-4 d-flex flex-column gap-2">
+                            <button class="btn btn-outline-primary" id="doorToggleBtn"><i class="fas fa-toggle-on me-2"></i>Toggle Door</button>
+                            <button class="btn btn-outline-warning" id="doorClearFaultBtn"><i class="fas fa-tools me-2"></i>Clear Fault</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RFID Card Management -->
+            <div class="card mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-id-card me-2 text-success"></i>RFID Access Card Management</span>
+                    <div class="d-flex gap-2 align-items-center">
+                        <span id="rfidCardCount" class="badge bg-primary rounded-pill">— cards</span>
+                        <button class="btn btn-sm btn-outline-secondary" id="refreshRfidBtn"><i class="fas fa-sync-alt me-1"></i>Refresh</button>
+                    </div>
+                </div>
+                <div class="card-body">
+
+                    <!-- Add / Register new card -->
+                    <div class="p-3 rounded-3 mb-4" style="background:#f8fafc; border:1px solid #e2e8f0;">
+                        <h6 class="fw-semibold mb-3"><i class="fas fa-plus-circle me-2 text-success"></i>Register New RFID Card</h6>
+                        <div class="row g-2">
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Card UID <span class="text-danger">*</span></label>
+                                <input type="text" id="rfid_new_uid" class="form-control form-control-sm" placeholder="e.g. A1:B2:C3:D4" maxlength="50">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Card Label</label>
+                                <input type="text" id="rfid_new_label" class="form-control form-control-sm" placeholder="e.g. Master Key" maxlength="80">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label small fw-semibold">Owner Name</label>
+                                <input type="text" id="rfid_new_owner" class="form-control form-control-sm" placeholder="e.g. John Doe" maxlength="80">
+                            </div>
+                            <div class="col-md-3 d-flex align-items-end">
+                                <button class="btn btn-success btn-sm w-100" id="rfidRegisterBtn">
+                                    <i class="fas fa-plus me-1"></i>Register Card
+                                </button>
+                            </div>
+                        </div>
+                        <div id="rfidRegisterMsg" class="mt-2" style="display:none;"></div>
+                    </div>
+
+                    <!-- Filter/Search bar -->
+                    <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+                        <div class="input-group input-group-sm" style="max-width:260px;">
+                            <span class="input-group-text"><i class="fas fa-search"></i></span>
+                            <input type="text" id="rfidSearchInput" class="form-control" placeholder="Search UID, label or owner...">
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-success me-1 rfid-filter-btn active" data-filter="all">All</button>
+                            <button class="btn btn-sm btn-outline-success me-1 rfid-filter-btn" data-filter="active">Active</button>
+                            <button class="btn btn-sm btn-outline-danger rfid-filter-btn" data-filter="revoked">Revoked</button>
+                        </div>
+                    </div>
+
+                    <!-- Cards Table -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0" id="rfidCardsTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th scope="col">#</th>
+                                    <th scope="col">Card UID</th>
+                                    <th scope="col">Label</th>
+                                    <th scope="col">Owner</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Synced</th>
+                                    <th scope="col">Registered</th>
+                                    <th scope="col" class="text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rfidCardsTableBody">
+                                <tr><td colspan="8" class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading cards...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="rfidEmptyMsg" class="text-center text-muted py-4" style="display:none;">
+                        <i class="fas fa-id-card fa-2x mb-2 d-block opacity-50"></i>No RFID cards found.
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Recent Door / RFID Events -->
+            <div class="card">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-history me-2 text-secondary"></i>Door &amp; RFID Event Log</span>
+                    <button class="btn btn-sm btn-outline-secondary" id="refreshDoorHistoryBtn"><i class="fas fa-sync-alt me-1"></i>Refresh</button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="event-log px-3 py-2" id="doorHistoryList">
+                        <div class="text-muted py-3 text-center"><i class="fas fa-spinner fa-spin me-2"></i>Loading events...</div>
                     </div>
                 </div>
             </div>
@@ -749,6 +907,304 @@
         function escapeHtml(str) { return str.replace(/[&<>]/g, function(m){if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
     }
 
+    // ===================== RFID MANAGEMENT =====================
+    let allRfidCards = [];
+    let rfidFilter = 'all';
+    let rfidSearch = '';
+
+    function formatDate(str) {
+        if (!str) return '—';
+        try { return new Date(str).toLocaleString([], {dateStyle:'short', timeStyle:'short'}); }
+        catch(e) { return str; }
+    }
+
+    function severityClass(sev) {
+        if (!sev) return 'sev-info';
+        const s = sev.toUpperCase();
+        if (s === 'CRITICAL' || s === 'ERROR') return 'sev-critical';
+        if (s === 'WARNING' || s === 'WARN') return 'sev-warning';
+        return 'sev-info';
+    }
+
+    function escapeHtmlRfid(str) {
+        if (!str) return '';
+        return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    function renderRfidTable() {
+        const tbody = document.getElementById('rfidCardsTableBody');
+        const emptyMsg = document.getElementById('rfidEmptyMsg');
+        let cards = allRfidCards;
+
+        // Filter by status
+        if (rfidFilter === 'active') cards = cards.filter(c => c.is_active);
+        if (rfidFilter === 'revoked') cards = cards.filter(c => !c.is_active);
+
+        // Filter by search
+        const q = rfidSearch.toLowerCase();
+        if (q) {
+            cards = cards.filter(c =>
+                (c.card_uid || '').toLowerCase().includes(q) ||
+                (c.card_label || '').toLowerCase().includes(q) ||
+                (c.owner_name || '').toLowerCase().includes(q)
+            );
+        }
+
+        // Update count badge
+        const activeCount = allRfidCards.filter(c => c.is_active).length;
+        document.getElementById('rfidCardCount').textContent =
+            `${activeCount} active / ${allRfidCards.length} total`;
+
+        if (!cards.length) {
+            tbody.innerHTML = '';
+            emptyMsg.style.display = '';
+            return;
+        }
+        emptyMsg.style.display = 'none';
+
+        tbody.innerHTML = cards.map((c, idx) => {
+            const statusBadge = c.is_active
+                ? `<span class="badge bg-success">Active</span>`
+                : `<span class="badge bg-danger" title="${escapeHtmlRfid(c.revoked_reason || '')}">Revoked</span>`;
+            const actionBtns = c.is_active
+                ? `<button class="btn btn-outline-danger btn-sm rfid-revoke-btn" data-uid="${escapeHtmlRfid(c.card_uid)}" title="Revoke card access">
+                       <i class="fas fa-ban me-1"></i>Revoke
+                   </button>`
+                : `<button class="btn btn-outline-success btn-sm rfid-approve-btn" data-uid="${escapeHtmlRfid(c.card_uid)}"
+                          data-label="${escapeHtmlRfid(c.card_label||'')}" data-owner="${escapeHtmlRfid(c.owner_name||'')}"
+                          title="Re-activate this card">
+                       <i class="fas fa-check me-1"></i>Approve
+                   </button>`;
+            return `<tr class="${c.is_active ? '' : 'table-danger bg-opacity-10'}">
+                <td class="text-muted small">${idx + 1}</td>
+                <td><span class="rfid-uid-badge">${escapeHtmlRfid(c.card_uid)}</span></td>
+                <td>${escapeHtmlRfid(c.card_label) || '<span class="text-muted">—</span>'}</td>
+                <td>${escapeHtmlRfid(c.owner_name) || '<span class="text-muted">—</span>'}</td>
+                <td>${statusBadge}</td>
+                <td class="small text-muted">${formatDate(c.last_synced_at)}</td>
+                <td class="small text-muted">${formatDate(c.created_at)}</td>
+                <td class="text-center">${actionBtns}
+                    <button class="btn btn-outline-danger btn-sm rfid-delete-btn ms-1" data-uid="${escapeHtmlRfid(c.card_uid)}" title="Permanently revoke">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+
+        // Bind action buttons
+        tbody.querySelectorAll('.rfid-revoke-btn').forEach(btn => {
+            btn.addEventListener('click', () => rfidAction('revoke', btn.dataset.uid));
+        });
+        tbody.querySelectorAll('.rfid-approve-btn').forEach(btn => {
+            btn.addEventListener('click', () => rfidAction('approve', btn.dataset.uid, btn.dataset.label, btn.dataset.owner));
+        });
+        tbody.querySelectorAll('.rfid-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => rfidAction('delete', btn.dataset.uid));
+        });
+    }
+
+    async function fetchRfidCards() {
+        try {
+            const res = await fetch('/api/rfid/cards');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            allRfidCards = await res.json();
+            renderRfidTable();
+        } catch(err) {
+            document.getElementById('rfidCardsTableBody').innerHTML =
+                `<tr><td colspan="8" class="text-danger text-center py-3"><i class="fas fa-exclamation-triangle me-2"></i>Failed to load cards: ${err.message}</td></tr>`;
+        }
+    }
+
+    async function rfidAction(action, cardUid, label, owner) {
+        const msgEl = document.getElementById('rfidRegisterMsg');
+        let url, body;
+
+        if (action === 'revoke' || action === 'delete') {
+            if (!confirm(`Are you sure you want to revoke card: ${cardUid}?`)) return;
+            url = '/api/rfid/revoke';
+            body = { card_uid: cardUid, reason: action === 'delete' ? 'deleted by admin' : 'revoked by admin' };
+        } else if (action === 'approve') {
+            // Re-register (re-activate) the card
+            url = '/api/rfid/register';
+            body = { card_uid: cardUid, card_label: label || '', owner_name: owner || '' };
+        }
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (res.ok) {
+                await fetchRfidCards();
+            } else {
+                alert(`Action failed: ${data.error || 'Unknown error'}`);
+            }
+        } catch(err) {
+            alert(`Network error: ${err.message}`);
+        }
+    }
+
+    function setupRfidManagement() {
+        // Register button
+        document.getElementById('rfidRegisterBtn').addEventListener('click', async () => {
+            const uid = document.getElementById('rfid_new_uid').value.trim();
+            const label = document.getElementById('rfid_new_label').value.trim();
+            const owner = document.getElementById('rfid_new_owner').value.trim();
+            const msgEl = document.getElementById('rfidRegisterMsg');
+
+            if (!uid) {
+                msgEl.innerHTML = `<div class="alert alert-warning py-2 mb-0"><i class="fas fa-exclamation-triangle me-1"></i>Card UID is required.</div>`;
+                msgEl.style.display = '';
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/rfid/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ card_uid: uid, card_label: label, owner_name: owner })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    msgEl.innerHTML = `<div class="alert alert-success py-2 mb-0"><i class="fas fa-check me-1"></i>${data.message || 'Card registered.'}</div>`;
+                    msgEl.style.display = '';
+                    document.getElementById('rfid_new_uid').value = '';
+                    document.getElementById('rfid_new_label').value = '';
+                    document.getElementById('rfid_new_owner').value = '';
+                    await fetchRfidCards();
+                    setTimeout(() => { msgEl.style.display = 'none'; }, 4000);
+                } else {
+                    msgEl.innerHTML = `<div class="alert alert-danger py-2 mb-0"><i class="fas fa-times me-1"></i>${data.error || 'Registration failed.'}</div>`;
+                    msgEl.style.display = '';
+                }
+            } catch(err) {
+                msgEl.innerHTML = `<div class="alert alert-danger py-2 mb-0">Network error: ${err.message}</div>`;
+                msgEl.style.display = '';
+            }
+        });
+
+        // Refresh button
+        document.getElementById('refreshRfidBtn').addEventListener('click', fetchRfidCards);
+
+        // Filter buttons
+        document.querySelectorAll('.rfid-filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.rfid-filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                rfidFilter = btn.dataset.filter;
+                renderRfidTable();
+            });
+        });
+
+        // Search
+        document.getElementById('rfidSearchInput').addEventListener('input', e => {
+            rfidSearch = e.target.value;
+            renderRfidTable();
+        });
+
+        // Initial fetch
+        fetchRfidCards();
+    }
+
+    // ===================== DOOR STATUS & HISTORY =====================
+    async function fetchDoorStatus() {
+        try {
+            const res = await fetch('/api/node/node_01/door/status');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const d = await res.json();
+
+            const stateEl = document.getElementById('doorStateDisplay');
+            const iconEl  = document.getElementById('doorStateIcon');
+            const labelEl = document.getElementById('doorStateLabel');
+            const tsEl    = document.getElementById('doorStateTs');
+
+            stateEl.className = 'p-3 rounded-3';
+            const state = (d.door_state || 'UNKNOWN').toUpperCase();
+            if (state === 'LOCKED')    { stateEl.classList.add('door-state-locked');   iconEl.className = 'fas fa-lock fa-2x mb-2'; iconEl.style.color='#d97706'; }
+            else if (state === 'UNLOCKED') { stateEl.classList.add('door-state-unlocked'); iconEl.className = 'fas fa-lock-open fa-2x mb-2'; iconEl.style.color='#059669'; }
+            else if (state === 'FAULT')    { stateEl.classList.add('door-state-fault');    iconEl.className = 'fas fa-exclamation-circle fa-2x mb-2'; iconEl.style.color='#dc3545'; }
+            else                           { stateEl.classList.add('door-state-unknown');  iconEl.className = 'fas fa-question-circle fa-2x mb-2'; iconEl.style.color='#6c757d'; }
+
+            labelEl.textContent = state;
+            tsEl.textContent = d.gateway_received_ts ? formatDate(d.gateway_received_ts) : '—';
+
+            document.getElementById('doorLastTrigger').textContent = d.last_trigger || '—';
+            const alarmEl = document.getElementById('doorAlarmActive');
+            alarmEl.textContent = d.alarm_active ? 'Yes' : 'No';
+            alarmEl.className = d.alarm_active ? 'badge bg-danger' : 'badge bg-success';
+            const faultEl = document.getElementById('doorFaultState');
+            faultEl.textContent = d.fault_state ? 'Yes' : 'No';
+            faultEl.className = d.fault_state ? 'badge bg-danger' : 'badge bg-success';
+        } catch(err) {
+            console.warn('Door status fetch error:', err);
+        }
+    }
+
+    async function fetchDoorHistory() {
+        try {
+            const res = await fetch('/api/node/node_01/door/history?limit=30');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const events = await res.json();
+            const listEl = document.getElementById('doorHistoryList');
+            if (!events || !events.length) {
+                listEl.innerHTML = '<div class="text-muted text-center py-3">No door events found.</div>';
+                return;
+            }
+            listEl.innerHTML = events.map(ev => {
+                const sevCls = severityClass(ev.severity);
+                const code = ev.event_code ? `<span class="badge bg-light text-dark me-1">${escapeHtmlRfid(ev.event_code)}</span>` : '';
+                const type = ev.event_type ? `<span class="badge bg-secondary me-1 opacity-75">${escapeHtmlRfid(ev.event_type)}</span>` : '';
+                return `<div class="door-event-row ${sevCls}">
+                    ${type}${code}
+                    <span>${escapeHtmlRfid(ev.description)}</span>
+                    <span class="text-muted ms-2 small">${formatDate(ev.gateway_received_ts)}</span>
+                </div>`;
+            }).join('');
+        } catch(err) {
+            document.getElementById('doorHistoryList').innerHTML =
+                `<div class="text-danger text-center py-3"><i class="fas fa-exclamation-triangle me-1"></i>Failed to load events: ${err.message}</div>`;
+        }
+    }
+
+    function setupDoorControls() {
+        document.getElementById('refreshDoorStatusBtn').addEventListener('click', fetchDoorStatus);
+        document.getElementById('refreshDoorHistoryBtn').addEventListener('click', fetchDoorHistory);
+
+        document.getElementById('doorToggleBtn').addEventListener('click', async () => {
+            if (!confirm('Toggle door state on Node_01?')) return;
+            try {
+                const res = await fetch('/api/node/node_01/door/toggle', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'toggle' })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    setTimeout(fetchDoorStatus, 800);
+                    setTimeout(fetchDoorHistory, 1200);
+                } else { alert(`Toggle failed: ${data.error}`); }
+            } catch(err) { alert(`Network error: ${err.message}`); }
+        });
+
+        document.getElementById('doorClearFaultBtn').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/node/node_01/door/clear_fault', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    setTimeout(fetchDoorStatus, 800);
+                } else { alert(`Clear fault failed: ${data.error}`); }
+            } catch(err) { alert(`Network error: ${err.message}`); }
+        });
+
+        // Initial load
+        fetchDoorStatus();
+        fetchDoorHistory();
+    }
+
     // Data refresh interval + events poll
     let intervalId;
     function startPolling() {
@@ -769,6 +1225,8 @@
             setupThresholdUpdates();
             setupSimulation();
             setupChat();
+            setupRfidManagement();
+            setupDoorControls();
             startPolling();
         };
         document.head.appendChild(script);
