@@ -55,6 +55,9 @@ constexpr const char* kFieldTimestamp   = "timestamp";
 constexpr const char* kFieldTemp        = "temp";
 constexpr const char* kFieldHumi        = "humi";
 constexpr const char* kFieldGas         = "gas";
+constexpr const char* kFieldLightLevel  = "light_level";
+constexpr const char* kFieldBuzzer      = "buzzer_active";
+constexpr const char* kFieldMuted       = "is_muted";
 
 } // anonymous namespace
 
@@ -367,10 +370,26 @@ SensorReading DataProcessor::buildReading(const nlohmann::json& doc) const {
     // Gas value: present and numeric? (int32_t ADC reading from MQ sensor)
     // Only populated for ENV_MONITOR_GAS nodes (ESP8266 with gas sensor).
     // Value range: 0–1023 for valid ADC readings, or -1 for sensor preheat.
-    if (pl.contains(kFieldGas) && pl[kFieldGas].is_number_integer()) {
+    // OPTIMIZATION: Node_01 (ESP32) does not use a gas sensor. We explicitly skip gas parsing for it.
+    if (r.nodeId != "ESP32_SEC_01" && pl.contains(kFieldGas) && pl[kFieldGas].is_number_integer()) {
         r.gasValue = pl[kFieldGas].get<int32_t>();
     }
     // else: remains nullopt (sensor not fitted, or field omitted)
+
+    // Light level: present and numeric? (ESP32 only)
+    if (pl.contains(kFieldLightLevel) && pl[kFieldLightLevel].is_number_integer()) {
+        r.lightLevel = pl[kFieldLightLevel].get<int32_t>();
+    }
+
+    // Buzzer active: present and boolean? (ESP32 only)
+    if (pl.contains(kFieldBuzzer) && pl[kFieldBuzzer].is_boolean()) {
+        r.buzzerActive = pl[kFieldBuzzer].get<bool>();
+    }
+
+    // Is muted: present and boolean? (ESP32 only)
+    if (pl.contains(kFieldMuted) && pl[kFieldMuted].is_boolean()) {
+        r.isMuted = pl[kFieldMuted].get<bool>();
+    }
 
     return r;
 }

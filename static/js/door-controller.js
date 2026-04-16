@@ -17,20 +17,55 @@
     if (el) el.textContent = value ?? '--';
   }
 
-  function setBadgeState(state) {
-    const badge = $('doorStateBadge');
-    if (!badge) return;
+  function setBadgeState(state, phase) {
+    const display = $('doorStateDisplay');
+    const label = $('doorStateLabel');
+    const icon = $('doorStateIcon');
+    if (!display || !label || !icon) return;
 
-    badge.className = 'door-state-badge';
     const s = (state || 'UNKNOWN').toUpperCase();
+    const p = (phase || '').toUpperCase();
 
-    if (s === 'LOCKED' || s === 'READY') badge.classList.add('door-state-ready');
-    else if (s === 'UNLOCKED' || s === 'OPEN') badge.classList.add('door-state-unlocked');
-    else if (s === 'FAULT') badge.classList.add('door-state-fault');
-    else if (s === 'OFFLINE') badge.classList.add('door-state-offline');
-    else badge.classList.add('door-state-unknown');
+    // Reset styles
+    display.className = 'p-3 rounded-3 text-center';
+    icon.className = 'fas fa-2x mb-2';
 
-    badge.textContent = s;
+    if (s === 'LOCKED' || s === 'READY' || s === 'CLOSED') {
+      display.classList.add('door-state-locked');
+      icon.style.color = '#ffc107';
+      if (p === 'CLOSING') {
+        icon.classList.add('fa-spinner', 'fa-spin');
+        label.textContent = 'CLOSING...';
+      } else {
+        icon.classList.add('fa-lock');
+        label.textContent = 'LOCKED';
+      }
+    } else if (s === 'UNLOCKED' || s === 'OPEN') {
+      display.classList.add('door-state-unlocked');
+      icon.style.color = '#198754';
+      if (p === 'OPENING') {
+        icon.classList.add('fa-spinner', 'fa-spin');
+        label.textContent = 'OPENING...';
+      } else {
+        icon.classList.add('fa-door-open');
+        label.textContent = 'UNLOCKED';
+      }
+    } else if (s === 'FAULT') {
+      display.classList.add('door-state-fault');
+      icon.classList.add('fa-exclamation-triangle');
+      icon.style.color = '#dc3545';
+      label.textContent = 'FAULT';
+    } else if (s === 'OFFLINE') {
+      display.classList.add('door-state-unknown');
+      icon.classList.add('fa-wifi', 'fa-fade');
+      icon.style.color = '#6c757d';
+      label.textContent = 'OFFLINE';
+    } else {
+      display.classList.add('door-state-unknown');
+      icon.classList.add('fa-question-circle');
+      icon.style.color = '#6c757d';
+      label.textContent = s;
+    }
   }
 
   function setOfflineState(message) {
@@ -106,7 +141,8 @@
 
   function renderStatus(payload) {
     const doorState = payload?.door_state || 'UNKNOWN';
-    setBadgeState(doorState);
+    const doorPhase = payload?.door_phase || 'UNKNOWN';
+    setBadgeState(doorState, doorPhase);
 
     safeText('doorLastTrigger', payload?.last_trigger || '--');
     safeText('doorLastUid', payload?.last_uid || '--');

@@ -755,7 +755,7 @@ def door_status(node_id: str):
 
     with get_db_connection() as conn:
         latest = conn.execute('''
-            SELECT event_type, event_code, severity, description, timestamp_ms, gateway_received_ts
+            SELECT event_type, event_code, severity, description, timestamp_ms, gateway_received_ts, raw_payload
             FROM door_events
             WHERE node_id = ?
             ORDER BY gateway_received_ts DESC, id DESC
@@ -796,9 +796,18 @@ def door_status(node_id: str):
         if 'INVALID RFID' in desc.upper() or 'BUZZER' in desc.upper() or fault_state:
             alarm_active = True
 
+        door_phase = 'UNKNOWN'
+        if latest['raw_payload']:
+            try:
+                raw_data = json.loads(latest['raw_payload'])
+                door_phase = raw_data.get('door_phase', raw_data.get('phase', 'UNKNOWN'))
+            except Exception:
+                pass
+
         status_payload = {
             'node_id': mqtt_node,
             'door_state': door_state,
+            'door_phase': door_phase,
             'fault_state': fault_state,
             'alarm_active': alarm_active,
             'last_trigger': latest['event_code'] or latest['event_type'] or 'UNKNOWN',
@@ -810,6 +819,7 @@ def door_status(node_id: str):
         status_payload = {
             'node_id': mqtt_node,
             'door_state': 'UNKNOWN',
+            'door_phase': 'UNKNOWN',
             'fault_state': False,
             'alarm_active': False,
             'last_trigger': None,
