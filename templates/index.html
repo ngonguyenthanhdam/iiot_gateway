@@ -678,12 +678,13 @@
                             alert(`${type} buzzer muted for ${node}`);
                         } else {
                             alert('Mute failed');
-         ert(`Network error: ${err.message}`); }
+                        }
+                    } catch(err) {
+                        alert(`Network error: ${err.message}`);
+                    }
+                });
+            }
         });
-
-        // Initial load
-        fetchDoorStatus();
-        fetchDoorHistory();
     }
 
     // Data refresh interval + events poll
