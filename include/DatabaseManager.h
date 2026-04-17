@@ -248,16 +248,7 @@ private:
     // -------------------------------------------------------------------------
     void migrateDevicesTable();
 
-    // -------------------------------------------------------------------------
-    // migrateDoorEventsTable — safe ALTER TABLE migration for door_events.
-    // -------------------------------------------------------------------------
-    void migrateDoorEventsTable();
 
-    // -------------------------------------------------------------------------
-    // migrateRegisteredRfidCardsTable — safe ALTER TABLE migration for
-    // registered_rfid_cards.
-    // -------------------------------------------------------------------------
-    void migrateRegisteredRfidCardsTable();
 
     // -------------------------------------------------------------------------
     // logSqliteError — writes a formatted SQLite error to stderr and the

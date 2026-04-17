@@ -255,63 +255,9 @@ void DatabaseManager::initSchema() {
         ON system_events (timestamp DESC);
     )SQL");
 
-    // ------------------------------------------------------------------
-    // Table 4: door_events — dedicated smart-door event history
-    // ------------------------------------------------------------------
-    execSQL(R"SQL(
-        CREATE TABLE IF NOT EXISTS door_events (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            node_id             TEXT    NOT NULL,
-            event_type          TEXT    NOT NULL,   -- DOOR_STATE | ALERT | COMMAND | RFID | FAULT_CLEAR | AUTH
-            event_code          TEXT,               -- LOCKED | UNLOCKED | FAULT | REED_FAULT ...
-            severity            TEXT,               -- INFO | WARNING | CRITICAL
-            description         TEXT    NOT NULL,
-            actor_role          TEXT,               -- ADMIN | SYSTEM
-            actor_id            TEXT,               -- optional user/admin identity
-            timestamp_ms        INTEGER,            -- device-origin timestamp in ms
-            gateway_received_ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-            raw_payload         TEXT
-        );
-    )SQL");
-
-    execSQL(R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_door_events_node_gateway_ts
-        ON door_events (node_id, gateway_received_ts DESC);
-    )SQL");
-
-    execSQL(R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_door_events_severity_gateway_ts
-        ON door_events (severity, gateway_received_ts DESC);
-    )SQL");
-
-    // ------------------------------------------------------------------
-    // Table 5: registered_rfid_cards — gateway-authoritative RFID lifecycle
-    // ------------------------------------------------------------------
-    execSQL(R"SQL(
-        CREATE TABLE IF NOT EXISTS registered_rfid_cards (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            card_uid       TEXT    NOT NULL UNIQUE,
-            card_label     TEXT,
-            owner_name     TEXT,
-            is_active      INTEGER NOT NULL DEFAULT 1,    -- 1=active, 0=revoked
-            created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
-            revoked_at     DATETIME,
-            revoked_reason TEXT,
-            last_synced_at DATETIME
-        );
-    )SQL");
-
-    execSQL(R"SQL(
-        CREATE INDEX IF NOT EXISTS idx_registered_rfid_cards_active
-        ON registered_rfid_cards (is_active, updated_at DESC);
-    )SQL");
-
     // Migrate existing databases to add new columns (safe ALTER TABLE)
     migrateSensorLogsTable();
     migrateDevicesTable();
-    migrateDoorEventsTable();
-    migrateRegisteredRfidCardsTable();
 }
 
 // -----------------------------------------------------------------------------
@@ -409,94 +355,7 @@ void DatabaseManager::migrateDevicesTable() {
     }
 }
 
-// -----------------------------------------------------------------------------
-// migrateDoorEventsTable
-//
-// Safely adds optional/new columns to door_events for backward compatibility.
-// -----------------------------------------------------------------------------
-void DatabaseManager::migrateDoorEventsTable() {
-    auto columnExists = [this](const string& colName) -> bool {
-        const char* sql = "PRAGMA table_info(door_events);";
-        sqlite3_stmt* stmt = nullptr;
-        int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
-        if (rc != SQLITE_OK) return false;
 
-        bool exists = false;
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-            if (name == colName) {
-                exists = true;
-                break;
-            }
-        }
-        sqlite3_finalize(stmt);
-        return exists;
-    };
-
-    if (!columnExists("event_code")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN event_code TEXT;");
-    }
-    if (!columnExists("actor_role")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN actor_role TEXT;");
-    }
-    if (!columnExists("actor_id")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN actor_id TEXT;");
-    }
-    if (!columnExists("timestamp_ms")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN timestamp_ms INTEGER;");
-    }
-    if (!columnExists("gateway_received_ts")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN gateway_received_ts DATETIME DEFAULT CURRENT_TIMESTAMP;");
-    }
-    if (!columnExists("raw_payload")) {
-        execSQL("ALTER TABLE door_events ADD COLUMN raw_payload TEXT;");
-    }
-}
-
-// -----------------------------------------------------------------------------
-// migrateRegisteredRfidCardsTable
-//
-// Safely adds optional/new columns to registered_rfid_cards for backward
-// compatibility.
-// -----------------------------------------------------------------------------
-void DatabaseManager::migrateRegisteredRfidCardsTable() {
-    auto columnExists = [this](const string& colName) -> bool {
-        const char* sql = "PRAGMA table_info(registered_rfid_cards);";
-        sqlite3_stmt* stmt = nullptr;
-        int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
-        if (rc != SQLITE_OK) return false;
-
-        bool exists = false;
-        while (sqlite3_step(stmt) == SQLITE_ROW) {
-            string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-            if (name == colName) {
-                exists = true;
-                break;
-            }
-        }
-        sqlite3_finalize(stmt);
-        return exists;
-    };
-
-    if (!columnExists("card_label")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN card_label TEXT;");
-    }
-    if (!columnExists("owner_name")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN owner_name TEXT;");
-    }
-    if (!columnExists("updated_at")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;");
-    }
-    if (!columnExists("revoked_at")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN revoked_at DATETIME;");
-    }
-    if (!columnExists("revoked_reason")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN revoked_reason TEXT;");
-    }
-    if (!columnExists("last_synced_at")) {
-        execSQL("ALTER TABLE registered_rfid_cards ADD COLUMN last_synced_at DATETIME;");
-    }
-}
 
 // =============================================================================
 // Public API
